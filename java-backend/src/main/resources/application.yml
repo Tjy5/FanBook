@@ -1,0 +1,44 @@
+spring:
+  application:
+    name: fanbook-java-backend
+  datasource:
+    url: ${FANBOOK_DATASOURCE_URL:jdbc:postgresql://localhost:5432/fanbook}
+    username: ${FANBOOK_DATASOURCE_USERNAME:fanbook}
+    password: ${FANBOOK_DATASOURCE_PASSWORD:fanbook}
+  data:
+    redis:
+      host: ${FANBOOK_REDIS_HOST:localhost}
+      port: ${FANBOOK_REDIS_PORT:6379}
+  flyway:
+    enabled: true
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: always
+
+fanbook:
+  storage:
+    root: ${FANBOOK_STORAGE_ROOT:./runtime/storage}
+  translation:
+    executor:
+      core-pool-size: 2
+      max-pool-size: 4
+    chunk-target-characters: 6000
+    max-segments-per-chunk: 40
+    max-attempts-per-chunk: 3
+  ai:
+    provider: ${FANBOOK_AI_PROVIDER:mock}
+    base-url: ${FANBOOK_AI_BASE_URL:https://api.openai.com/v1}
+    api-key: ${FANBOOK_AI_API_KEY:}
+    model: ${FANBOOK_AI_MODEL:mock-translator}
+    request-timeout: 90s
+    max-concurrency: 2
