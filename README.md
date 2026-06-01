@@ -224,6 +224,12 @@ FanBook/
 
 ## 运行测试
 
+首次运行测试前安装开发依赖：
+
+```bash
+pip install -r requirements-dev.txt
+```
+
 ```bash
 python -m pytest tests/unit tests/integration -q
 ```

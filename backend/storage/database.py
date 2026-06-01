@@ -404,7 +404,7 @@ class FanbookDatabase:
         error_summary = self._attr(job, "error_summary", default=None)
         resume_from = self._attr(job, "resume_from", default=None)
         created_at = self._attr(job, "created_at", default=self._now_iso())
-        updated_at = self._attr(job, "updated_at", default=self._now_iso())
+        updated_at = self._now_iso()
 
         with self._lock, self._connection() as conn:
             conn.execute(

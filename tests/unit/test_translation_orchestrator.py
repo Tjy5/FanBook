@@ -72,6 +72,7 @@ class RecordingChunkProvider(TranslationProvider):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.requested_texts: list[str] = []
+        self.request_segment_counts: list[int] = []
 
     @property
     def name(self) -> str:
@@ -88,6 +89,7 @@ class RecordingChunkProvider(TranslationProvider):
         self,
         request: ChunkTranslationRequest,
     ) -> ChunkTranslationResponse:
+        self.request_segment_counts.append(len(request.segments))
         self.requested_texts.extend(segment.source_text for segment in request.segments)
         return ChunkTranslationResponse(
             items=tuple(
@@ -126,6 +128,28 @@ def _build_batch(segment_count: int) -> ChapterTranslationBatch:
             chapter_id=chapter.id,
             order=index + 1,
             source_text=("Long segment " + str(index) + " ") * 40,
+            segment_type=SegmentType.PARAGRAPH,
+            status=SegmentStatus.PENDING,
+        )
+        for index in range(segment_count)
+    )
+    return ChapterTranslationBatch(chapter=chapter, segments=segments)
+
+
+def _build_short_batch(segment_count: int) -> ChapterTranslationBatch:
+    chapter = Chapter(
+        id=1,
+        book_id=1,
+        order=1,
+        title="Chapter One",
+        source_doc_path="chapter-1.xhtml",
+    )
+    segments = tuple(
+        Segment(
+            id=index + 1,
+            chapter_id=chapter.id,
+            order=index + 1,
+            source_text=f"Item {index + 1}",
             segment_type=SegmentType.PARAGRAPH,
             status=SegmentStatus.PENDING,
         )
@@ -215,6 +239,32 @@ def test_orchestrator_reuses_exact_duplicate_low_risk_segments() -> None:
     assert len(results) == 4
     assert provider.requested_texts.count("Repeatable Chapter Title") == 1
     assert provider.requested_texts.count("Repeated body text stays contextual.") == 2
+
+
+def test_orchestrator_caps_chunk_segment_count_for_weak_chat_completions() -> None:
+    provider = RecordingChunkProvider()
+    orchestrator = TranslationOrchestrator()
+
+    results = orchestrator.translate_book(
+        book=_build_book(),
+        chapters=(_build_short_batch(94),),
+        provider=provider,
+        settings=TranslationRuntimeSettings.from_options(
+            {
+                "api_mode": "chat_completions",
+                "structured_output_strength": "weak",
+                "chunk_target_tokens": 1000,
+                "global_max_concurrency": 1,
+                "per_chapter_concurrency": 1,
+            }
+        ),
+    )
+
+    assert len(results) == 94
+    assert provider.request_segment_counts
+    assert max(provider.request_segment_counts) <= 24
+    assert sum(provider.request_segment_counts) == 94
+    assert len(provider.request_segment_counts) >= 4
 
 
 def test_global_rate_controller_scales_up_and_down() -> None:

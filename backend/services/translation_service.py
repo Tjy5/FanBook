@@ -315,6 +315,26 @@ class TranslationService:
                     fallback_reason_code = classify_chunk_issue(error_summary)
                     if fallback_reason_code is not None:
                         chunk_fallback_reasons[chunk.chunk_id] = fallback_reason_code
+                    if self.checkpoint_store is None:
+                        return
+                    self.checkpoint_store.save_chunk_state(
+                        job_id=job.id,
+                        chunk_id=chunk.chunk_id,
+                        book_id=book.id,
+                        chapter_id=chunk.chapter_id,
+                        segment_ids=chunk.segment_ids,
+                        sequence_no=chunk.sequence_no,
+                        status="running",
+                        provider_name=provider.name,
+                        model_name=provider.model_name,
+                        term_snapshot_version="glossary-v1",
+                        last_error=error_summary,
+                        fallback_reason_code=fallback_reason_code,
+                        segment_count=len(chunk.segments),
+                        source_char_count=sum(len(segment.source_text) for segment in chunk.segments),
+                        estimated_tokens=chunk.estimated_tokens,
+                        fallback_count=chunk_fallback_counts.get(chunk.chunk_id, 0),
+                    )
 
                 self.orchestrator.translate_book(
                     book=book,

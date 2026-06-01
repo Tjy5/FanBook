@@ -2,6 +2,7 @@ from io import BytesIO
 import json
 import shutil
 import threading
+import time
 from pathlib import Path
 from uuid import uuid4
 import zipfile
@@ -23,6 +24,7 @@ from backend.core.translation.runtime_settings import (
     TranslationRuntimeSettings,
 )
 from backend.domain.enums import ExportArtifactKind, SegmentStatus, TranslationJobStatus
+from backend.domain.models import TranslationJob
 from backend.services.book_service import BookService
 from backend.services.translation_service import TranslationExecutionError, TranslationService
 from backend.storage.artifact_store import ArtifactStore
@@ -195,6 +197,31 @@ def test_translation_service_translates_all_segments_with_mock_provider() -> Non
         cleanup_root(root)
 
 
+def test_database_update_translation_job_refreshes_updated_at() -> None:
+    root = make_root()
+    try:
+        book_service, _ = build_services(root)
+        created = book_service.create_book(filename="demo.epub", content=build_epub_bytes())
+        database = book_service.database
+        job = database.create_translation_job(
+            TranslationJob(
+                book_id=created.book.id,
+                status=TranslationJobStatus.PENDING,
+            )
+        )
+
+        original_updated_at = job.updated_at
+        time.sleep(0.01)
+        job.status = TranslationJobStatus.RUNNING
+        job.progress = 0.5
+        updated = database.update_translation_job(job)
+
+        assert updated.created_at == job.created_at
+        assert updated.updated_at != original_updated_at
+    finally:
+        cleanup_root(root)
+
+
 
 def test_translation_service_persists_chunk_checkpoints() -> None:
     root = make_root()
@@ -298,6 +325,33 @@ class FallbackRecordingProvider(TranslationProvider):
         ]
         return TranslationResponse(
             translated_text="\n".join(translated_lines),
+            provider_name=self.name,
+            model_name=self.model_name,
+        )
+
+    def translate_chunk(self, request: ChunkTranslationRequest):
+        raise TranslationProviderError("OpenAI API returned invalid JSON for chunk translation.")
+
+
+class BlockingFallbackProbeProvider(TranslationProvider):
+    default_model_name = "fallback-probe-v1"
+    fallback_started = threading.Event()
+    release_translation = threading.Event()
+
+    @classmethod
+    def reset(cls) -> None:
+        cls.fallback_started = threading.Event()
+        cls.release_translation = threading.Event()
+
+    @property
+    def name(self) -> str:
+        return "fallback-probe"
+
+    def translate(self, request: TranslationRequest) -> TranslationResponse:
+        type(self).fallback_started.set()
+        type(self).release_translation.wait(timeout=5.0)
+        return TranslationResponse(
+            translated_text=f"ZH: {request.text}",
             provider_name=self.name,
             model_name=self.model_name,
         )
@@ -499,6 +553,53 @@ def test_translation_service_persists_fallback_reason_codes_in_chunk_checkpoints
         assert any(snapshot.fallback_reason_code == "invalid_json" for snapshot in chunk_snapshots)
         assert all(snapshot.status == "completed" for snapshot in chunk_snapshots)
     finally:
+        cleanup_root(root)
+
+
+def test_translation_service_persists_running_chunk_fallback_state() -> None:
+    root = make_root()
+    BlockingFallbackProbeProvider.reset()
+    try:
+        checkpoint_store = CheckpointStore(root / "runtime")
+        provider_factory = TranslationProviderFactory({"fallback-probe": BlockingFallbackProbeProvider})
+        book_service, translation_service = build_services(
+            root,
+            provider_factory=provider_factory,
+            checkpoint_store=checkpoint_store,
+        )
+        created = book_service.create_book(filename="demo.epub", content=build_epub_bytes())
+
+        errors: list[Exception] = []
+
+        def run_translation() -> None:
+            try:
+                translation_service.start_translation(
+                    created.book.id,
+                    provider_name="fallback-probe",
+                )
+            except Exception as exc:  # pragma: no cover - defensive test guard
+                errors.append(exc)
+
+        worker = threading.Thread(target=run_translation, daemon=True)
+        worker.start()
+
+        assert BlockingFallbackProbeProvider.fallback_started.wait(timeout=2.0)
+        chunk_snapshots = checkpoint_store.list_chunks(1)
+        assert chunk_snapshots
+        assert any(snapshot.status == "running" for snapshot in chunk_snapshots)
+        assert any(snapshot.fallback_count >= 1 for snapshot in chunk_snapshots)
+        assert any(snapshot.fallback_reason_code == "invalid_json" for snapshot in chunk_snapshots)
+        assert any(
+            "invalid JSON for chunk translation" in (snapshot.last_error or "")
+            for snapshot in chunk_snapshots
+        )
+
+        BlockingFallbackProbeProvider.release_translation.set()
+        worker.join(timeout=5.0)
+        assert not worker.is_alive()
+        assert not errors
+    finally:
+        BlockingFallbackProbeProvider.release_translation.set()
         cleanup_root(root)
 
 

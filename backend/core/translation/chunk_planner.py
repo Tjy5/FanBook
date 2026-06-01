@@ -29,6 +29,7 @@ class PlannedChunk:
 
 class TranslationChunkPlanner:
     _DIALOGUE_SLACK_RATIO = 1.12
+    _WEAK_STRUCTURED_OUTPUT_SEGMENT_LIMIT = 24
 
     def __init__(
         self,
@@ -54,6 +55,7 @@ class TranslationChunkPlanner:
         current_tokens = 0
         sequence_no = 0
         target_budget = self.estimator.target_chunk_budget()
+        max_segments_per_chunk = self._max_segments_per_chunk()
 
         for index, segment in enumerate(segments):
             candidate = ChunkSegment(
@@ -67,6 +69,26 @@ class TranslationChunkPlanner:
             if not current_segments:
                 current_start = index
                 current_segments.append(candidate)
+                current_tokens = segment_tokens
+                continue
+
+            if (
+                max_segments_per_chunk is not None
+                and len(current_segments) >= max_segments_per_chunk
+            ):
+                chunks.append(
+                    self._build_chunk(
+                        chapter=chapter,
+                        sequence_no=sequence_no,
+                        start_index=current_start,
+                        end_index=index,
+                        estimated_tokens=current_tokens,
+                        segments=tuple(current_segments),
+                    )
+                )
+                sequence_no += 1
+                current_segments = [candidate]
+                current_start = index
                 current_tokens = segment_tokens
                 continue
 
@@ -132,6 +154,13 @@ class TranslationChunkPlanner:
             )
 
         return tuple(chunks)
+
+    def _max_segments_per_chunk(self) -> int | None:
+        if self.settings.structured_output_strength != "weak":
+            return None
+        if self.settings.api_mode == "chat_completions":
+            return self._WEAK_STRUCTURED_OUTPUT_SEGMENT_LIMIT
+        return self._WEAK_STRUCTURED_OUTPUT_SEGMENT_LIMIT * 2
 
     @staticmethod
     def _build_chunk(
