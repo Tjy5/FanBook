@@ -94,6 +94,10 @@ public class BookEntity {
         this.translatedTitle = translatedTitle;
     }
 
+    public void updateSourceObjectKey(String sourceObjectKey) {
+        this.sourceObjectKey = sourceObjectKey;
+    }
+
     public void markStatus(BookStatus status) {
         this.status = status;
     }
