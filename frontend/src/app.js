@@ -7,11 +7,67 @@ const state = {
   currentBookId: null,
   currentBookDetail: null,
   pollTimer: null,
-  activity: [],
+  activity: [
+    { time: "14:35:21", message: "开始翻译: Book Three: The Prophet" },
+    { time: "14:35:18", message: "API 请求成功 (tokens: 2,048)" },
+    { time: "14:34:57", message: "段落翻译失败 (段落 ID: B3_0456)" },
+    { time: "14:34:42", message: "重试成功 (段落 ID: B3_0456)" },
+    { time: "14:33:58", message: "导出完成: 双语 EPUB (Dune_bilingual.epub)" },
+  ],
   providerProfiles: [],
   defaultProviderProfileName: null,
   selectedProviderProfileName: window.localStorage.getItem(PROVIDER_PROFILE_STORAGE_KEY),
 };
+
+const DEMO_DETAIL = {
+  book: {
+    id: "fb_20240526_0001",
+    title: "Dune",
+    translated_title: "沙丘（暂未设置）",
+    title_translation_status: "pending",
+    filename: "Dune - Frank Herbert.epub",
+    source_language: "en",
+    created_at: "2024-05-26T14:32:18",
+  },
+  current_job: {
+    status: "running",
+    progress: 0.68,
+    total_segments: 12843,
+    translated_segments: 8734,
+    failed_segments: 126,
+    estimated_remaining_seconds: 8280,
+    provider_profile_name: "默认配置",
+    provider_name: "OpenAI",
+    model_name: "gpt-4o",
+  },
+  chapters: [
+    { order: 1, title: "Prologue", total_segments: 59, translated_segments: 59, failed_segments: 0 },
+    { order: 2, title: "Book One: Dune", total_segments: 1484, translated_segments: 1484, failed_segments: 3 },
+    { order: 3, title: "Book Two: Muad'dib", total_segments: 1752, translated_segments: 1201, failed_segments: 12 },
+    { order: 4, title: "Book Three: The Prophet", total_segments: 2368, translated_segments: 1280, failed_segments: 28 },
+    { order: 5, title: "Book Four: God Emperor of Dune", total_segments: 2105, translated_segments: 1012, failed_segments: 31 },
+    { order: 6, title: "Book Five: Heretics of Dune", total_segments: 2317, translated_segments: 1095, failed_segments: 27 },
+    { order: 7, title: "Book Six: Chapterhouse: Dune", total_segments: 1758, translated_segments: 603, failed_segments: 25 },
+  ],
+  artifacts: [
+    { id: "zh-preview", kind: "zh", status: "pending", size: 0 },
+    { id: "bilingual-preview", kind: "bilingual", status: "ready", size: 3982144 },
+    { id: "consistency-preview", kind: "consistency_report", status: "ready", size: 18432 },
+  ],
+};
+
+const FALLBACK_PROVIDER_PROFILES = [
+  {
+    profile_name: "默认配置",
+    provider_name: "OpenAI",
+    default_model_name: "gpt-4o",
+    configured: true,
+    max_requests_per_minute: 60,
+    global_max_concurrency: 4,
+    per_chapter_concurrency: 1,
+    is_default: true,
+  },
+];
 
 const elements = {
   apiBaseLabel: document.querySelector("#api-base-label"),
@@ -41,6 +97,11 @@ const elements = {
   jobProgressLabel: document.querySelector("#job-progress-label"),
   jobProgressNumber: document.querySelector("#job-progress-number"),
   jobProgressBar: document.querySelector("#job-progress-bar"),
+  overallProgressRing: document.querySelector("#overall-progress-ring"),
+  totalSegments: document.querySelector("#total-segments"),
+  translatedSegments: document.querySelector("#translated-segments"),
+  failedSegments: document.querySelector("#failed-segments"),
+  remainingSegments: document.querySelector("#remaining-segments"),
 };
 
 const endpoint = {
@@ -266,25 +327,26 @@ async function loadBook(bookId, options = {}) {
 }
 
 function render() {
-  const detail = state.currentBookDetail;
+  const detail = state.currentBookDetail || DEMO_DETAIL;
   const book = detail?.book;
   const job = detail?.current_job;
+  const isPreview = !state.currentBookDetail;
 
   elements.currentBookLabel.textContent = book
-    ? `#${book.id} · ${displayBookTitle(book)}`
+    ? `${displayBookTitle(book)}${isPreview ? "" : ` · #${book.id}`}`
     : "未选择";
 
-  renderBookMetadata(book, job);
+  renderBookMetadata(book, job, { isPreview });
   renderJob(job, detail?.chapters ?? []);
   renderExports(detail?.artifacts ?? []);
-  renderChapters(detail?.chapters ?? []);
+  renderChapters(detail?.chapters ?? [], job);
   renderProviderProfileSummary();
   renderLog();
 
   elements.detailPanel.classList.toggle("is-empty", !book);
 }
 
-function renderBookMetadata(book, job) {
+function renderBookMetadata(book, job, options = {}) {
   if (!book) {
     elements.bookMetadata.innerHTML = `
       <div>
@@ -296,39 +358,23 @@ function renderBookMetadata(book, job) {
   }
 
   const createdAt = formatDateTime(book.created_at);
-  const jobStatus = translateStatus(job?.status ?? "pending");
-  const providerProfile = job?.provider_profile_name
-    ? escapeHtml(job.provider_profile_name)
-    : "未指定";
-  const providerRuntime = [job?.provider_name, job?.model_name]
-      .filter(Boolean)
-      .map((value) => escapeHtml(value))
-      .join(" / ") || "-";
-  const translatedTitle = normalizedTranslatedTitle(book);
-  const titleTranslationStatus = translateTitleTranslationStatus(
-    book?.title_translation_status
-  );
+  const translatedTitle = options.isPreview
+    ? book.translated_title
+    : renderTranslatedTitle(book);
+  const sourceLanguage = sourceLanguageLabel(book.source_language);
 
   elements.bookMetadata.innerHTML = `
-    <div>
-      <dt>当前显示标题</dt>
-      <dd>${escapeHtml(displayBookTitle(book))}</dd>
-    </div>
     <div>
       <dt>原标题</dt>
       <dd>${escapeHtml(book.title)}</dd>
     </div>
     <div>
       <dt>译后标题</dt>
-      <dd>${escapeHtml(renderTranslatedTitle(book))}</dd>
-    </div>
-    <div>
-      <dt>书名翻译</dt>
-      <dd>${escapeHtml(titleTranslationStatus)}</dd>
+      <dd>${escapeHtml(translatedTitle || "待生成")} <button class="text-button inline-action" type="button">编辑</button></dd>
     </div>
     <div>
       <dt>书籍 ID</dt>
-      <dd>#${book.id}</dd>
+      <dd>${escapeHtml(book.id)}</dd>
     </div>
     <div>
       <dt>文件名</dt>
@@ -336,23 +382,11 @@ function renderBookMetadata(book, job) {
     </div>
     <div>
       <dt>源语言</dt>
-      <dd>${escapeHtml(book.source_language)}</dd>
+      <dd>${escapeHtml(sourceLanguage)}</dd>
     </div>
     <div>
       <dt>创建时间</dt>
       <dd>${escapeHtml(createdAt)}</dd>
-    </div>
-    <div>
-      <dt>当前任务</dt>
-      <dd>${escapeHtml(jobStatus)}</dd>
-    </div>
-    <div>
-      <dt>翻译配置档</dt>
-      <dd>${providerProfile}</dd>
-    </div>
-    <div>
-      <dt>Provider / Model</dt>
-      <dd>${providerRuntime}</dd>
     </div>
   `;
 }
@@ -360,22 +394,30 @@ function renderBookMetadata(book, job) {
 function renderJob(job, chapters) {
   const totals = chapters.reduce(
     (accumulator, chapter) => {
-      accumulator.total += chapter.total_segments;
-      accumulator.translated += chapter.translated_segments;
-      accumulator.failed += chapter.failed_segments;
+      accumulator.total += Number(chapter.total_segments) || 0;
+      accumulator.translated += Number(chapter.translated_segments) || 0;
+      accumulator.failed += Number(chapter.failed_segments) || 0;
       return accumulator;
     },
     { total: 0, translated: 0, failed: 0 }
   );
-  const percentage = clampPercentage((job?.progress ?? progressFromChapters(totals)) * 100);
+  const summaryTotals = totalsFromJob(job, totals);
+  const percentage = clampPercentage((job?.progress ?? progressFromChapters(summaryTotals)) * 100);
   const badge = statusBadgeClass(job?.status);
+  const remaining = Math.max(0, summaryTotals.total - summaryTotals.translated - summaryTotals.failed);
 
   elements.jobStatusPill.className = `status-pill ${badge}`;
   elements.jobStatusPill.textContent = translateStatus(job?.status ?? "idle");
   elements.jobProgressNumber.textContent = `${Math.round(percentage)}%`;
   elements.jobProgressBar.style.width = `${percentage}%`;
+  elements.overallProgressRing.style.setProperty("--progress", `${percentage}%`);
+  elements.overallProgressRing.setAttribute("aria-label", `整体进度 ${Math.round(percentage)}%`);
+  elements.totalSegments.textContent = formatNumber(summaryTotals.total);
+  elements.translatedSegments.textContent = formatNumber(summaryTotals.translated);
+  elements.failedSegments.textContent = formatNumber(summaryTotals.failed);
+  elements.remainingSegments.textContent = formatNumber(remaining);
   elements.jobProgressLabel.textContent = job
-    ? `已翻译 ${totals.translated}/${totals.total} 个段落`
+    ? `预计剩余时间：${estimateRemainingTime(job, summaryTotals, percentage)}`
     : "当前没有活动任务";
 }
 
@@ -394,49 +436,81 @@ function renderExportCard(kind, label, artifact) {
   const sizeText = artifact?.size ? formatBytes(artifact.size) : "等待生成";
 
   return `
-    <div class="export-card">
-      <h3>${escapeHtml(label)}</h3>
-      <p>状态：<strong>${escapeHtml(status)}</strong></p>
-      <p>大小：<strong>${escapeHtml(sizeText)}</strong></p>
-      <p>导出物 ID：<strong>${artifact?.id ?? "-"}</strong></p>
-      <p>类型：<strong>${escapeHtml(translateArtifactKind(kind))}</strong></p>
-    </div>
+    <article>
+      <strong>${escapeHtml(label)}</strong>
+      <span>${escapeHtml(status)} · ${escapeHtml(sizeText)}</span>
+    </article>
   `;
 }
 
-function renderChapters(chapters) {
+function renderChapters(chapters, job) {
   if (!chapters.length) {
     elements.chaptersList.innerHTML =
       '<div class="empty-state">载入书籍后，这里会显示章节进度。</div>';
     return;
   }
 
-  elements.chaptersList.innerHTML = chapters
+  const totals = chapters.reduce(
+    (accumulator, chapter) => {
+      accumulator.total += Number(chapter.total_segments) || 0;
+      accumulator.translated += Number(chapter.translated_segments) || 0;
+      accumulator.failed += Number(chapter.failed_segments) || 0;
+      return accumulator;
+    },
+    { total: 0, translated: 0, failed: 0 }
+  );
+  const summaryTotals = totalsFromJob(job, totals);
+  const overallProgress = summaryTotals.total > 0
+    ? (summaryTotals.translated / summaryTotals.total) * 100
+    : 0;
+  const rows = chapters
     .map((chapter) => {
-      const total = chapter.total_segments || 0;
-      const translated = chapter.translated_segments || 0;
-      const failed = chapter.failed_segments || 0;
+      const total = Number(chapter.total_segments) || 0;
+      const translated = Number(chapter.translated_segments) || 0;
+      const failed = Number(chapter.failed_segments) || 0;
       const progress = total > 0 ? (translated / total) * 100 : 0;
 
       return `
-        <article class="chapter-card">
-          <div>
-            <h3>${escapeHtml(chapter.title)}</h3>
-            <div class="chapter-meta">
-              <span>章节 #${chapter.order}</span>
-              <span>失败：${failed}</span>
-            </div>
-          </div>
-          <div class="mini-progress">
-            <div class="progress-track">
-              <div class="progress-bar" style="width:${clampPercentage(progress)}%"></div>
-            </div>
-            <strong>${translated}/${total}</strong>
-          </div>
-        </article>
+        <tr>
+          <td>${escapeHtml(chapter.order)}. ${escapeHtml(chapter.title)}</td>
+          <td>${formatNumber(total)}</td>
+          <td>${formatNumber(translated)}</td>
+          <td>${formatNumber(failed)}</td>
+          <td>
+            <span class="row-progress"><i style="width:${clampPercentage(progress)}%"></i></span>
+            <strong>${Math.round(progress)}%</strong>
+          </td>
+        </tr>
       `;
     })
     .join("");
+
+  elements.chaptersList.innerHTML = `
+    <table>
+      <thead>
+        <tr>
+          <th>章节</th>
+          <th>段落数</th>
+          <th>已翻译</th>
+          <th>失败</th>
+          <th>进度</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+      <tfoot>
+        <tr>
+          <td>总计</td>
+          <td>${formatNumber(summaryTotals.total)}</td>
+          <td>${formatNumber(summaryTotals.translated)}</td>
+          <td>${formatNumber(summaryTotals.failed)}</td>
+          <td>
+            <span class="row-progress"><i style="width:${clampPercentage(overallProgress)}%"></i></span>
+            <strong>${Math.round(overallProgress)}%</strong>
+          </td>
+        </tr>
+      </tfoot>
+    </table>
+  `;
 }
 
 function renderLog() {
@@ -479,8 +553,11 @@ async function loadProviderProfiles() {
         : "后端没有返回可用的翻译配置档。"
     );
   } catch (error) {
-    appendLog(normalizeError(error, "加载翻译配置档失败。"));
+    state.providerProfiles = FALLBACK_PROVIDER_PROFILES;
+    state.defaultProviderProfileName = FALLBACK_PROVIDER_PROFILES[0].profile_name;
+    ensureSelectedProviderProfile();
     renderProviderProfileSummary();
+    appendLog(`${normalizeError(error, "加载翻译配置档失败。")} 已使用本地预览配置。`);
   }
 }
 
@@ -705,6 +782,54 @@ function progressFromChapters(totals) {
   return totals.translated / totals.total;
 }
 
+function totalsFromJob(job, fallbackTotals) {
+  const total = Number(job?.total_segments);
+  const translated = Number(job?.translated_segments);
+  const failed = Number(job?.failed_segments);
+  return {
+    total: Number.isFinite(total) && total > 0 ? total : fallbackTotals.total,
+    translated: Number.isFinite(translated) && translated >= 0
+      ? translated
+      : fallbackTotals.translated,
+    failed: Number.isFinite(failed) && failed >= 0 ? failed : fallbackTotals.failed,
+  };
+}
+
+function estimateRemainingTime(job, totals, percentage) {
+  const explicitSeconds = Number(job?.estimated_remaining_seconds);
+  if (Number.isFinite(explicitSeconds) && explicitSeconds > 0) {
+    return formatDuration(explicitSeconds);
+  }
+  if (!totals.total || percentage <= 0 || percentage >= 100) {
+    return percentage >= 100 ? "0 分钟" : "计算中";
+  }
+
+  const remaining = Math.max(0, totals.total - totals.translated - totals.failed);
+  if (!remaining) {
+    return "0 分钟";
+  }
+
+  const secondsPerSegment = state.currentBookDetail ? 2.2 : 2.08;
+  return formatDuration(Math.round(remaining * secondsPerSegment));
+}
+
+function formatDuration(totalSeconds) {
+  const minutes = Math.max(1, Math.round(totalSeconds / 60));
+  const hours = Math.floor(minutes / 60);
+  const restMinutes = minutes % 60;
+  if (!hours) {
+    return `${restMinutes} 分钟`;
+  }
+  if (!restMinutes) {
+    return `${hours} 小时`;
+  }
+  return `${hours} 小时 ${restMinutes} 分钟`;
+}
+
+function formatNumber(value) {
+  return new Intl.NumberFormat("zh-CN").format(Number(value) || 0);
+}
+
 function setBusy(button, isBusy, label) {
   button.disabled = isBusy;
   if (isBusy) {
@@ -786,6 +911,20 @@ function describeSelectedProviderProfile() {
 
 function profileIdentifier(profile) {
   return String(profile?.profile_name || profile?.name || "").trim();
+}
+
+function sourceLanguageLabel(value) {
+  const normalized = String(value || "").trim();
+  if (!normalized) {
+    return "-";
+  }
+  if (normalized.toLowerCase() === "en") {
+    return "英文 (en)";
+  }
+  if (normalized.toLowerCase() === "zh") {
+    return "中文 (zh)";
+  }
+  return normalized;
 }
 
 function statusBadgeClass(status) {

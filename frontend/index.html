@@ -4,222 +4,334 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Fanbook</title>
-    <link rel="stylesheet" href="./src/styles.css" />
+    <link rel="stylesheet" href="./src/styles.css?v=20260602-4" />
   </head>
   <body>
-    <div class="page-shell">
-      <div class="ambient ambient-a"></div>
-      <div class="ambient ambient-b"></div>
+    <div class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="./" aria-label="Fanbook 首页">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <span>Fanbook</span>
+        </a>
 
-      <header class="hero">
-        <div class="hero-copy">
-          <p class="eyebrow">Fanbook 工作台</p>
-          <h1>像跟踪生产任务一样推进 EPUB 翻译。</h1>
-          <p class="hero-text">
-            上传一本英文 EPUB，查看解析与翻译进度，并基于同一份结果导出中文版本和中英双语版本。
-          </p>
+        <div class="connection-strip" aria-label="连接状态">
+          <span>API 连接</span>
+          <strong class="status-dot-text"><span class="status-dot"></span>已连接</strong>
+          <span class="divider"></span>
+          <span>API</span>
+          <strong id="api-base-label">/api</strong>
+          <span class="divider"></span>
+          <span>Provider</span>
+          <strong>OpenAI (gpt-4o)</strong>
         </div>
-        <div class="hero-panel">
-          <div class="metric">
-            <span class="metric-label">当前书籍</span>
-            <strong id="current-book-label">未选择</strong>
-          </div>
-          <div class="metric">
-            <span class="metric-label">自动刷新</span>
-            <strong id="polling-label">空闲</strong>
-          </div>
-          <div class="metric">
-            <span class="metric-label">API 基础路径</span>
-            <strong id="api-base-label">/api</strong>
-          </div>
-        </div>
+
+        <button class="settings-button" type="button" aria-label="打开设置">
+          <span class="gear" aria-hidden="true"></span>
+          设置
+          <span aria-hidden="true">⌄</span>
+        </button>
       </header>
 
-      <main class="dashboard">
-        <section class="panel panel-upload">
-          <div class="panel-header">
-            <div>
-              <p class="section-kicker">步骤 1</p>
-              <h2>上传 EPUB</h2>
-            </div>
-            <span class="status-pill status-neutral">创建书籍并初始化任务</span>
+      <main class="app-frame">
+        <aside class="library-sidebar" aria-label="书籍库">
+          <div class="sidebar-header">
+            <h1>书籍库</h1>
+            <button id="refresh-book" class="icon-button" type="button" aria-label="刷新当前书籍">↻</button>
+            <button id="use-latest-book" class="button button-primary compact" type="button">使用记忆书籍</button>
           </div>
 
-          <form id="upload-form" class="stack-form">
-            <label class="field">
-              <span>EPUB 文件</span>
-              <input id="book-file" name="book-file" type="file" accept=".epub" required />
+          <form id="lookup-form" class="search-form">
+            <label class="search-field" aria-label="搜索书籍或输入书籍 ID">
+              <span aria-hidden="true">⌕</span>
+              <input id="book-id-input" name="book-id" type="text" placeholder="搜索书籍或输入 ID" />
             </label>
-
-            <label class="field">
-              <span>标题覆盖（可选）</span>
-              <input
-                id="book-title"
-                name="book-title"
-                type="text"
-                placeholder="留空则使用 EPUB 元数据中的标题"
-              />
-            </label>
-
-            <label class="field">
-              <span>源语言</span>
-              <input id="source-language" name="source-language" type="text" value="en" />
-            </label>
-
-            <button id="upload-button" class="button button-primary" type="submit">
-              上传并解析
-            </button>
-          </form>
-        </section>
-
-        <section class="panel panel-lookup">
-          <div class="panel-header">
-            <div>
-              <p class="section-kicker">步骤 2</p>
-              <h2>载入已有书籍</h2>
-            </div>
-            <span class="status-pill status-accent">从已保存状态继续</span>
-          </div>
-
-          <form id="lookup-form" class="lookup-form">
-            <label class="field field-inline">
-              <span>书籍 ID</span>
-              <input id="book-id-input" name="book-id" type="number" min="1" placeholder="例如 12" />
-            </label>
-            <button class="button button-secondary" type="submit">载入</button>
+            <button class="visually-hidden" type="submit">载入</button>
           </form>
 
-          <div class="bookmark-row">
-            <button id="use-latest-book" class="button button-ghost" type="button">
-              使用已记忆书籍
-            </button>
-            <button id="refresh-book" class="button button-ghost" type="button">
-              刷新详情
-            </button>
+          <div class="library-tabs" aria-label="书籍状态筛选">
+            <button class="tab-button active" type="button">全部 <span>12</span></button>
+            <button class="tab-button" type="button">进行中 <span>3</span></button>
+            <button class="tab-button" type="button">已完成 <span>7</span></button>
+            <button class="tab-button" type="button">失败 <span>2</span></button>
           </div>
-        </section>
 
-        <section id="book-detail-panel" class="detail-grid is-empty">
-          <article class="panel">
-            <div class="panel-header">
+          <div id="book-list" class="book-list" aria-label="书籍列表">
+            <article class="book-row active">
+              <div class="mini-cover dune-cover" aria-hidden="true"></div>
               <div>
-                <p class="section-kicker">书籍</p>
-                <h2>元数据</h2>
+                <h2>Dune</h2>
+                <p>Frank Herbert</p>
+                <span>英文 → 中文</span>
               </div>
-            </div>
-            <dl id="book-metadata" class="metadata-list">
-              <div>
-                <dt>状态</dt>
-                <dd>请先载入或上传一本书。</dd>
-              </div>
-            </dl>
-          </article>
+              <time>2 分钟前</time>
+              <strong class="book-status running">进行中</strong>
+            </article>
 
-          <article class="panel">
-            <div class="panel-header">
+            <article class="book-row">
+              <div class="mini-cover pragmatic-cover" aria-hidden="true"></div>
               <div>
-                <p class="section-kicker">步骤 3</p>
-                <h2>翻译任务</h2>
+                <h2>The Pragmatic Programmer</h2>
+                <p>Andrew Hunt, David Thomas</p>
+                <span>英文 → 中文</span>
               </div>
-              <span id="job-status-pill" class="status-pill status-neutral">空闲</span>
-            </div>
+              <time>3 小时前</time>
+              <strong class="book-status done">已完成</strong>
+            </article>
 
-            <div class="progress-card">
-              <div class="progress-head">
-                <span id="job-progress-label">当前没有活动任务</span>
-                <strong id="job-progress-number">0%</strong>
+            <article class="book-row">
+              <div class="mini-cover clean-cover" aria-hidden="true"></div>
+              <div>
+                <h2>Clean Code</h2>
+                <p>Robert C. Martin</p>
+                <span>英文 → 中文</span>
               </div>
-              <div class="progress-track">
+              <time>昨天 22:15</time>
+              <strong class="book-status done">已完成</strong>
+            </article>
+
+            <article class="book-row">
+              <div class="mini-cover thinking-cover" aria-hidden="true"></div>
+              <div>
+                <h2>Thinking, Fast and Slow</h2>
+                <p>Daniel Kahneman</p>
+                <span>英文 → 中文</span>
+              </div>
+              <time>昨天 18:34</time>
+              <strong class="book-status done">已完成</strong>
+            </article>
+
+            <article class="book-row">
+              <div class="mini-cover hobbit-cover" aria-hidden="true"></div>
+              <div>
+                <h2>The Hobbit</h2>
+                <p>J.R.R. Tolkien</p>
+                <span>英文 → 中文</span>
+              </div>
+              <time>昨天 16:20</time>
+              <strong class="book-status failed">失败</strong>
+            </article>
+
+            <article class="book-row">
+              <div class="mini-cover orwell-cover" aria-hidden="true"></div>
+              <div>
+                <h2>1984</h2>
+                <p>George Orwell</p>
+                <span>英文 → 中文</span>
+              </div>
+              <time>昨天 10:11</time>
+              <strong class="book-status done">已完成</strong>
+            </article>
+          </div>
+        </aside>
+
+        <section id="book-detail-panel" class="workspace-main">
+          <nav class="workspace-toolbar" aria-label="当前书籍导航">
+            <button class="icon-button" type="button" aria-label="返回书籍列表">←</button>
+            <strong id="current-book-label">Dune</strong>
+          </nav>
+
+          <div class="workspace-grid">
+            <section class="book-hero" aria-labelledby="book-title-heading">
+              <div id="book-cover" class="book-cover" aria-hidden="true">
+                <span>DUNE</span>
+              </div>
+
+              <dl id="book-metadata" class="metadata-list">
+                <div>
+                  <dt>原标题</dt>
+                  <dd id="book-title-heading">Dune</dd>
+                </div>
+                <div>
+                  <dt>译后标题</dt>
+                  <dd>沙丘（暂未设置） <button class="text-button inline-action" type="button">编辑</button></dd>
+                </div>
+                <div>
+                  <dt>书籍 ID</dt>
+                  <dd>fb_20240526_0001</dd>
+                </div>
+                <div>
+                  <dt>文件名</dt>
+                  <dd>Dune - Frank Herbert.epub</dd>
+                </div>
+                <div>
+                  <dt>源语言</dt>
+                  <dd>英文 (en)</dd>
+                </div>
+                <div>
+                  <dt>创建时间</dt>
+                  <dd>2024-05-26 14:32:18</dd>
+                </div>
+              </dl>
+            </section>
+
+            <section class="summary-panel" aria-labelledby="summary-title">
+              <div class="panel-heading">
+                <h2 id="summary-title">翻译任务总览</h2>
+                <span id="job-status-pill" class="status-pill status-running">进行中</span>
+              </div>
+
+              <div class="summary-body">
+                <div
+                  id="overall-progress-ring"
+                  class="progress-ring"
+                  style="--progress: 68%"
+                  role="img"
+                  aria-label="整体进度 68%"
+                >
+                  <span id="job-progress-number">68%</span>
+                  <small>整体进度</small>
+                </div>
+
+                <div class="summary-stats">
+                  <div>
+                    <span>总段落数</span>
+                    <strong id="total-segments">12,843</strong>
+                  </div>
+                  <div>
+                    <span>已翻译段落数</span>
+                    <strong id="translated-segments" class="accent-text">8,734</strong>
+                  </div>
+                  <div>
+                    <span>失败段落数</span>
+                    <strong id="failed-segments" class="danger-text">126</strong>
+                  </div>
+                  <div>
+                    <span>剩余段落数</span>
+                    <strong id="remaining-segments">3,983</strong>
+                  </div>
+                </div>
+              </div>
+
+              <div class="progress-inline" aria-hidden="true">
                 <div id="job-progress-bar" class="progress-bar"></div>
               </div>
-            </div>
+              <p id="job-progress-label" class="estimate-text">预计剩余时间：2 小时 18 分钟</p>
+            </section>
 
-            <form id="translation-form" class="stack-form compact-form">
-              <p>翻译配置由后端 `.env` 中的 provider profile 提供，开始和恢复任务前可先选择要使用的配置档。</p>
+            <section class="chapters-panel" aria-labelledby="chapters-title">
+              <div class="panel-heading">
+                <h2 id="chapters-title">章节进度</h2>
+              </div>
+              <div id="chapters-list" class="chapter-table">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>章节</th>
+                      <th>段落数</th>
+                      <th>已翻译</th>
+                      <th>失败</th>
+                      <th>进度</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>1. Prologue</td>
+                      <td>59</td>
+                      <td>59</td>
+                      <td>0</td>
+                      <td><span class="row-progress"><i style="width: 100%"></i></span><strong>100%</strong></td>
+                    </tr>
+                    <tr>
+                      <td>2. Book One: Dune</td>
+                      <td>1,484</td>
+                      <td>1,484</td>
+                      <td>3</td>
+                      <td><span class="row-progress"><i style="width: 99%"></i></span><strong>99%</strong></td>
+                    </tr>
+                    <tr>
+                      <td>3. Book Two: Muad'dib</td>
+                      <td>1,752</td>
+                      <td>1,201</td>
+                      <td>12</td>
+                      <td><span class="row-progress"><i style="width: 68%"></i></span><strong>68%</strong></td>
+                    </tr>
+                    <tr>
+                      <td>4. Book Three: The Prophet</td>
+                      <td>2,368</td>
+                      <td>1,280</td>
+                      <td>28</td>
+                      <td><span class="row-progress"><i style="width: 54%"></i></span><strong>54%</strong></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+        </section>
 
-              <label class="field">
-                <span>翻译配置档</span>
-                <select id="translation-provider-profile" name="translation-provider-profile"></select>
+        <aside class="actions-rail" aria-label="操作">
+          <section class="rail-panel">
+            <h2>操作</h2>
+            <form id="upload-form" class="upload-form">
+              <label class="upload-dropzone">
+                <span aria-hidden="true">⇧</span>
+                上传 EPUB
+                <input id="book-file" name="book-file" type="file" accept=".epub" required />
               </label>
 
-              <p id="translation-provider-summary" class="field-note">
-                正在加载可用配置档。
-              </p>
+              <label class="field">
+                <span>标题覆盖</span>
+                <input id="book-title" name="book-title" type="text" placeholder="可选" />
+              </label>
 
-              <div class="action-row">
-                <button id="translate-button" class="button button-primary" type="submit">
-                  开始翻译
-                </button>
-                <button id="resume-button" class="button button-secondary" type="button">
-                  恢复任务
-                </button>
-                <button id="stop-polling-button" class="button button-secondary" type="button">
-                  停止自动刷新
-                </button>
-              </div>
+              <label class="field">
+                <span>源语言</span>
+                <input id="source-language" name="source-language" type="text" value="en" />
+              </label>
+
+              <button id="upload-button" class="button button-secondary full" type="submit">上传并解析</button>
             </form>
-          </article>
+          </section>
 
-          <article class="panel">
-            <div class="panel-header">
-              <div>
-                <p class="section-kicker">步骤 4</p>
-                <h2>导出结果</h2>
-              </div>
-            </div>
-            <div id="export-list" class="export-grid">
-              <div class="export-card">
-                <h3>中文 EPUB</h3>
-                <p>翻译完成后可下载。</p>
-              </div>
-              <div class="export-card">
-                <h3>中英双语 EPUB</h3>
-                <p>翻译完成后可下载。</p>
-              </div>
-              <div class="export-card">
-                <h3>一致性报告</h3>
-                <p>翻译完成后可下载 JSON / Markdown 报告。</p>
-              </div>
-            </div>
-            <div class="action-row">
-              <button id="download-zh" class="button button-secondary" type="button">
-                下载中文 EPUB
-              </button>
-              <button id="download-bilingual" class="button button-secondary" type="button">
-                下载中英双语 EPUB
-              </button>
-              <button id="download-consistency" class="button button-secondary" type="button">
-                下载一致性报告
-              </button>
-            </div>
-          </article>
+          <section class="rail-panel">
+            <h2>翻译配置档</h2>
+            <form id="translation-form" class="translation-form">
+              <label class="field">
+                <span class="visually-hidden">翻译配置档</span>
+                <select id="translation-provider-profile" name="translation-provider-profile"></select>
+              </label>
+              <p id="translation-provider-summary" class="profile-summary">正在加载可用配置档。</p>
+              <button id="translate-button" class="button button-primary full" type="submit">开始翻译</button>
+              <button id="resume-button" class="button button-secondary full" type="button">恢复任务</button>
+              <button id="stop-polling-button" class="button button-danger full" type="button">停止自动刷新</button>
+            </form>
+            <p class="auto-refresh"><span class="status-dot"></span><span id="polling-label">自动刷新已开启 (10s)</span></p>
+          </section>
 
-          <article class="panel panel-wide">
-            <div class="panel-header">
-              <div>
-                <p class="section-kicker">段落</p>
-                <h2>章节进度</h2>
-              </div>
+          <section class="rail-panel">
+            <h2>导出</h2>
+            <div id="export-list" class="export-list">
+              <article><strong>中文 EPUB</strong><span>等待生成</span></article>
+              <article><strong>中英双语 EPUB</strong><span>等待生成</span></article>
+              <article><strong>一致性报告</strong><span>等待生成</span></article>
             </div>
-            <div id="chapters-list" class="chapters-list">
-              <div class="empty-state">载入书籍后，这里会显示章节进度。</div>
+            <div class="export-actions">
+              <button id="download-zh" class="button button-secondary full" type="button">导出中文 EPUB</button>
+              <button id="download-bilingual" class="button button-secondary full" type="button">导出中英双语 EPUB</button>
+              <button id="download-consistency" class="button button-secondary full" type="button">导出一致性报告</button>
             </div>
-          </article>
+          </section>
 
-          <article class="panel panel-wide">
-            <div class="panel-header">
-              <div>
-                <p class="section-kicker">日志</p>
-                <h2>活动记录</h2>
-              </div>
+          <section class="rail-panel log-panel">
+            <div class="panel-heading compact-heading">
+              <h2>活动日志</h2>
+              <button class="text-button" type="button">清空</button>
             </div>
             <div id="message-log" class="message-log" aria-live="polite"></div>
-          </article>
-        </section>
+          </section>
+        </aside>
       </main>
+
+      <footer class="app-footer">
+        <span>© 2024 Fanbook: EPUB 翻译工作台</span>
+        <span>v1.2.0</span>
+        <span>文档中心</span>
+        <span>反馈建议</span>
+        <strong>本地存储位置: D:\Fanbook\workspace</strong>
+        <strong>磁盘空间: 215 GB 可用</strong>
+      </footer>
     </div>
 
-    <script type="module" src="./src/app.js"></script>
+    <script type="module" src="./src/app.js?v=20260602-4"></script>
   </body>
 </html>
-
