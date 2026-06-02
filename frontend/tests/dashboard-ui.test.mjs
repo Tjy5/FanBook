@@ -86,8 +86,36 @@ const requiredJsFragments = [
   'style.setProperty("--progress"',
   "<table>",
   "row-progress",
+  "loadBooks",
+  "renderBookList",
+  "updateTranslatedTitle",
+  "new FormData()",
+  'formData.append("file"',
+  "response.bookId",
+  "providerName",
+  "modelName",
+  "/translation-jobs",
+  "/translation-jobs/resume",
+  "/exports/zh",
+  "/exports/bilingual",
+  "/translated-title",
 ];
 
 for (const fragment of requiredJsFragments) {
   assert.ok(js.includes(fragment), `Expected app.js to include ${fragment}`);
+}
+
+const deprecatedJsFragments = [
+  "/books/${bookId}/translate`",
+  "/books/${bookId}/resume`",
+  "/books/${bookId}/export/zh`",
+  "/books/${bookId}/export/bilingual`",
+  "content_base64",
+  "response.book_id",
+  "response.job_id",
+  "profileName:",
+];
+
+for (const fragment of deprecatedJsFragments) {
+  assert.ok(!js.includes(fragment), `Expected app.js not to include deprecated fragment ${fragment}`);
 }

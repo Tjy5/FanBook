@@ -16,13 +16,13 @@
 
         <div class="connection-strip" aria-label="连接状态">
           <span>API 连接</span>
-          <strong class="status-dot-text"><span class="status-dot"></span>已连接</strong>
+          <strong id="api-connection-label" class="status-dot-text"><span class="status-dot"></span>待检测</strong>
           <span class="divider"></span>
           <span>API</span>
           <strong id="api-base-label">/api</strong>
           <span class="divider"></span>
           <span>Provider</span>
-          <strong>OpenAI (gpt-4o)</strong>
+          <strong id="provider-status-label">加载中</strong>
         </div>
 
         <button class="settings-button" type="button" aria-label="打开设置">
@@ -293,7 +293,7 @@
               <p id="translation-provider-summary" class="profile-summary">正在加载可用配置档。</p>
               <button id="translate-button" class="button button-primary full" type="submit">开始翻译</button>
               <button id="resume-button" class="button button-secondary full" type="button">恢复任务</button>
-              <button id="stop-polling-button" class="button button-danger full" type="button">停止自动刷新</button>
+              <button id="stop-polling-button" class="button button-danger full" type="button">取消当前任务</button>
             </form>
             <p class="auto-refresh"><span class="status-dot"></span><span id="polling-label">自动刷新已开启 (10s)</span></p>
           </section>

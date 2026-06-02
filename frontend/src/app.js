@@ -6,6 +6,9 @@ const POLL_INTERVAL_MS = 3000;
 const state = {
   currentBookId: null,
   currentBookDetail: null,
+  books: [],
+  statusCounts: null,
+  activeBookFilter: "all",
   pollTimer: null,
   activity: [
     { time: "14:35:21", message: "开始翻译: Book Three: The Prophet" },
@@ -71,6 +74,8 @@ const FALLBACK_PROVIDER_PROFILES = [
 
 const elements = {
   apiBaseLabel: document.querySelector("#api-base-label"),
+  apiConnectionLabel: document.querySelector("#api-connection-label"),
+  providerStatusLabel: document.querySelector("#provider-status-label"),
   currentBookLabel: document.querySelector("#current-book-label"),
   pollingLabel: document.querySelector("#polling-label"),
   uploadForm: document.querySelector("#upload-form"),
@@ -102,16 +107,21 @@ const elements = {
   translatedSegments: document.querySelector("#translated-segments"),
   failedSegments: document.querySelector("#failed-segments"),
   remainingSegments: document.querySelector("#remaining-segments"),
+  bookList: document.querySelector("#book-list"),
+  libraryTabs: document.querySelector(".library-tabs"),
 };
 
 const endpoint = {
   createBook: () => `${API_BASE}/books`,
+  listBooks: () => `${API_BASE}/books`,
   listProviders: () => `${API_BASE}/providers`,
   getBook: (bookId) => `${API_BASE}/books/${bookId}`,
-  startTranslation: (bookId) => `${API_BASE}/books/${bookId}/translate`,
-  resumeTranslation: (bookId) => `${API_BASE}/books/${bookId}/resume`,
-  exportZh: (bookId) => `${API_BASE}/books/${bookId}/export/zh`,
-  exportBilingual: (bookId) => `${API_BASE}/books/${bookId}/export/bilingual`,
+  updateTranslatedTitle: (bookId) => `${API_BASE}/books/${bookId}/translated-title`,
+  startTranslation: (bookId) => `${API_BASE}/books/${bookId}/translation-jobs`,
+  resumeTranslation: (bookId) => `${API_BASE}/books/${bookId}/translation-jobs/resume`,
+  cancelTranslation: (jobId) => `${API_BASE}/translation-jobs/${jobId}/cancel`,
+  exportZh: (bookId) => `${API_BASE}/books/${bookId}/exports/zh`,
+  exportBilingual: (bookId) => `${API_BASE}/books/${bookId}/exports/bilingual`,
   consistencyReport: (bookId) => `${API_BASE}/books/${bookId}/reports/consistency`,
 };
 
@@ -120,6 +130,8 @@ boot();
 function boot() {
   elements.apiBaseLabel.textContent = API_BASE;
   bindEvents();
+  renderBookList();
+  void loadBooks();
   void loadProviderProfiles();
 
   const rememberedBookId = window.localStorage.getItem(STORAGE_KEY);
@@ -157,8 +169,7 @@ function bindEvents() {
     void loadBook(rememberedBookId, { silent: false });
   });
   elements.stopPollingButton.addEventListener("click", () => {
-    stopPolling();
-    appendLog("已停止自动刷新。");
+    void cancelCurrentTranslation();
   });
   elements.resumeButton.addEventListener("click", () => {
     void resumeTranslation();
@@ -171,6 +182,29 @@ function bindEvents() {
   });
   elements.downloadConsistencyButton.addEventListener("click", () => {
     void downloadArtifact("consistency_report");
+  });
+  elements.bookList.addEventListener("click", (event) => {
+    const row = event.target.closest("[data-book-id]");
+    if (!row) {
+      return;
+    }
+    elements.bookIdInput.value = row.dataset.bookId;
+    void loadBook(row.dataset.bookId, { silent: false });
+  });
+  elements.libraryTabs.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-filter]");
+    if (!button) {
+      return;
+    }
+    state.activeBookFilter = button.dataset.filter;
+    renderBookList();
+  });
+  elements.bookMetadata.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-edit-translated-title]");
+    if (!button) {
+      return;
+    }
+    void updateTranslatedTitle();
   });
 }
 
@@ -191,28 +225,26 @@ async function onUploadSubmit(event) {
   appendLog(`开始上传 ${file.name}。`);
 
   try {
-    const contentBase64 = await fileToBase64(file);
-    const payload = {
-      filename: file.name,
-      title: titleInput.value.trim() || null,
-      source_language: languageInput.value.trim() || "en",
-      content: contentBase64,
-      content_base64: contentBase64,
-      content_encoding: "base64",
-    };
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("sourceLanguage", languageInput.value.trim() || "en");
+    if (titleInput.value.trim()) {
+      formData.append("title", titleInput.value.trim());
+    }
 
     const response = await fetchJson(endpoint.createBook(), {
       method: "POST",
-      body: JSON.stringify(payload),
+      body: formData,
     });
 
-    const createdBookId = response.book_id;
+    const createdBookId = response.bookId;
     if (!createdBookId) {
-      throw new Error("创建书籍的响应中缺少 `book_id`。");
+      throw new Error("创建书籍的响应中缺少 `bookId`。");
     }
 
     appendLog(`上传完成，已创建书籍 #${createdBookId}。`);
     elements.bookIdInput.value = String(createdBookId);
+    await loadBooks({ silent: true });
     await loadBook(createdBookId, { silent: true });
   } catch (error) {
     appendLog(normalizeError(error, "上传失败。"));
@@ -250,9 +282,10 @@ async function onTranslateSubmit(event) {
     });
 
     appendLog(
-      `翻译任务已启动，任务 #${response.job_id ?? "?"}，状态 ${translateStatus(response.status ?? "unknown")}。`
+      `翻译任务已启动，任务 #${response.jobId ?? "?"}，状态 ${translateStatus(response.status ?? "unknown")}。`
     );
     await loadBook(state.currentBookId, { silent: true });
+    await loadBooks({ silent: true });
     startPolling();
   } catch (error) {
     appendLog(normalizeError(error, "启动翻译失败。"));
@@ -279,14 +312,41 @@ async function resumeTranslation() {
     });
 
     appendLog(
-      `恢复请求已发送，任务 #${response.job_id ?? "?"}，状态 ${translateStatus(response.status ?? "unknown")}。`
+      `恢复请求已发送，任务 #${response.jobId ?? "?"}，状态 ${translateStatus(response.status ?? "unknown")}。`
     );
     await loadBook(state.currentBookId, { silent: true });
+    await loadBooks({ silent: true });
     startPolling();
   } catch (error) {
     appendLog(normalizeError(error, "恢复翻译失败。"));
   } finally {
     setBusy(elements.resumeButton, false, "恢复任务");
+  }
+}
+
+async function cancelCurrentTranslation() {
+  const jobId = state.currentBookDetail?.current_job?.job_id;
+  if (!jobId) {
+    stopPolling();
+    appendLog("当前没有可取消的翻译任务，已停止自动刷新。");
+    return;
+  }
+
+  setBusy(elements.stopPollingButton, true, "取消中...");
+  try {
+    const response = await fetchJson(endpoint.cancelTranslation(jobId), {
+      method: "POST",
+    });
+    stopPolling();
+    appendLog(`已取消任务 #${response.jobId ?? jobId}，状态 ${translateStatus(response.status ?? "unknown")}。`);
+    if (state.currentBookId) {
+      await loadBook(state.currentBookId, { silent: true });
+      await loadBooks({ silent: true });
+    }
+  } catch (error) {
+    appendLog(normalizeError(error, "取消任务失败。"));
+  } finally {
+    setBusy(elements.stopPollingButton, false, "取消当前任务");
   }
 }
 
@@ -326,6 +386,26 @@ async function loadBook(bookId, options = {}) {
   }
 }
 
+async function loadBooks(options = {}) {
+  try {
+    const response = await fetchJson(endpoint.listBooks(), {
+      method: "GET",
+    });
+    state.books = Array.isArray(response?.books) ? response.books : [];
+    state.statusCounts = response?.status_counts || null;
+    renderBookList();
+    if (!options.silent) {
+      appendLog(`已加载 ${state.books.length} 本书籍。`);
+    }
+    setApiConnectionStatus(true);
+  } catch (error) {
+    setApiConnectionStatus(false);
+    if (!options.silent) {
+      appendLog(normalizeError(error, "加载书籍列表失败。"));
+    }
+  }
+}
+
 function render() {
   const detail = state.currentBookDetail || DEMO_DETAIL;
   const book = detail?.book;
@@ -340,6 +420,7 @@ function render() {
   renderJob(job, detail?.chapters ?? []);
   renderExports(detail?.artifacts ?? []);
   renderChapters(detail?.chapters ?? [], job);
+  renderBookList();
   renderProviderProfileSummary();
   renderLog();
 
@@ -370,7 +451,7 @@ function renderBookMetadata(book, job, options = {}) {
     </div>
     <div>
       <dt>译后标题</dt>
-      <dd>${escapeHtml(translatedTitle || "待生成")} <button class="text-button inline-action" type="button">编辑</button></dd>
+      <dd>${escapeHtml(translatedTitle || "待生成")} <button class="text-button inline-action" type="button" data-edit-translated-title>编辑</button></dd>
     </div>
     <div>
       <dt>书籍 ID</dt>
@@ -389,6 +470,81 @@ function renderBookMetadata(book, job, options = {}) {
       <dd>${escapeHtml(createdAt)}</dd>
     </div>
   `;
+}
+
+function renderBookList() {
+  renderLibraryTabs();
+  if (!state.books.length) {
+    elements.bookList.innerHTML =
+      '<div class="empty-state">暂无书籍。上传 EPUB 后会出现在这里。</div>';
+    return;
+  }
+
+  const filteredBooks = state.books.filter((book) => {
+    if (state.activeBookFilter === "all") {
+      return true;
+    }
+    return String(book.status || "").toLowerCase() === state.activeBookFilter;
+  });
+
+  if (!filteredBooks.length) {
+    elements.bookList.innerHTML =
+      '<div class="empty-state">当前筛选下没有书籍。</div>';
+    return;
+  }
+
+  elements.bookList.innerHTML = filteredBooks
+    .map((book) => {
+      const status = String(book.status || "pending").toLowerCase();
+      const activeClass = Number(book.id) === Number(state.currentBookId) ? " active" : "";
+      return `
+        <article class="book-row${activeClass}" data-book-id="${escapeHtml(book.id)}" role="button" tabindex="0">
+          <div class="mini-cover" aria-hidden="true"><span>${escapeHtml(bookCoverInitials(book))}</span></div>
+          <div>
+            <h2>${escapeHtml(displayBookTitle(book) || "未命名书籍")}</h2>
+            <p>${escapeHtml(book.filename || "-")}</p>
+            <span>${escapeHtml(sourceLanguageLabel(book.source_language))} → 中文</span>
+          </div>
+          <time>${escapeHtml(formatDateTime(book.updated_at || book.created_at))}</time>
+          <strong class="book-status ${bookStatusClass(status)}">${escapeHtml(translateStatus(status))}</strong>
+        </article>
+      `;
+    })
+    .join("");
+}
+
+function renderLibraryTabs() {
+  const counts = state.statusCounts || countBooksByStatus(state.books);
+  const tabs = [
+    ["all", "全部", counts.total],
+    ["running", "进行中", counts.running],
+    ["completed", "已完成", counts.completed],
+    ["failed", "失败", counts.failed],
+  ];
+  elements.libraryTabs.innerHTML = tabs
+    .map(([filter, label, count]) => {
+      const activeClass = state.activeBookFilter === filter ? " active" : "";
+      return `<button class="tab-button${activeClass}" type="button" data-filter="${filter}">${label} <span>${formatNumber(count)}</span></button>`;
+    })
+    .join("");
+}
+
+function countBooksByStatus(books) {
+  return books.reduce(
+    (counts, book) => {
+      counts.total += 1;
+      const status = String(book.status || "").toLowerCase();
+      if (status === "running") {
+        counts.running += 1;
+      } else if (status === "completed") {
+        counts.completed += 1;
+      } else if (status === "failed") {
+        counts.failed += 1;
+      }
+      return counts;
+    },
+    { total: 0, running: 0, completed: 0, failed: 0 }
+  );
 }
 
 function renderJob(job, chapters) {
@@ -547,6 +703,7 @@ async function loadProviderProfiles() {
     ).trim() || null;
     ensureSelectedProviderProfile();
     renderProviderProfileSummary();
+    setApiConnectionStatus(true);
     appendLog(
       state.providerProfiles.length
         ? `已加载 ${state.providerProfiles.length} 个翻译配置档，当前选择 ${describeSelectedProviderProfile()}。`
@@ -557,6 +714,7 @@ async function loadProviderProfiles() {
     state.defaultProviderProfileName = FALLBACK_PROVIDER_PROFILES[0].profile_name;
     ensureSelectedProviderProfile();
     renderProviderProfileSummary();
+    setApiConnectionStatus(false);
     appendLog(`${normalizeError(error, "加载翻译配置档失败。")} 已使用本地预览配置。`);
   }
 }
@@ -581,6 +739,7 @@ function renderProviderProfileSummary() {
     select.disabled = true;
     select.innerHTML = '<option value="">未找到可用配置</option>';
     summary.textContent = "当前没有可用的翻译配置档。";
+    elements.providerStatusLabel.textContent = "不可用";
     return;
   }
 
@@ -598,6 +757,7 @@ function renderProviderProfileSummary() {
   const selectedProfile = getSelectedProviderProfile();
   if (!selectedProfile) {
     summary.textContent = "请选择一个翻译配置档。";
+    elements.providerStatusLabel.textContent = "未选择";
     return;
   }
 
@@ -607,8 +767,37 @@ function renderProviderProfileSummary() {
   const rpmLimit = selectedProfile.max_requests_per_minute ?? "-";
   const globalConcurrency = selectedProfile.global_max_concurrency ?? "-";
   const perChapterConcurrency = selectedProfile.per_chapter_concurrency ?? "-";
+  elements.providerStatusLabel.textContent = `${providerName} (${modelName})`;
   summary.textContent =
     `当前将使用配置档 ${profileIdentifier(selectedProfile)}，provider 为 ${providerName}，模型为 ${modelName}，RPM 上限 ${rpmLimit}，全局并发 ${globalConcurrency}，单章并发 ${perChapterConcurrency}，状态 ${configuredText}。`;
+}
+
+async function updateTranslatedTitle() {
+  if (!state.currentBookId || !state.currentBookDetail?.book) {
+    appendLog("请先加载一本书，再编辑译后标题。");
+    return;
+  }
+
+  const currentValue = normalizedTranslatedTitle(state.currentBookDetail.book);
+  const nextValue = window.prompt("译后标题", currentValue);
+  if (nextValue === null) {
+    return;
+  }
+
+  try {
+    const response = await fetchJson(endpoint.updateTranslatedTitle(state.currentBookId), {
+      method: "PATCH",
+      body: JSON.stringify({
+        translated_title: nextValue.trim(),
+      }),
+    });
+    state.currentBookDetail = response;
+    appendLog(`译后标题已更新为「${nextValue.trim() || "未设置"}」。`);
+    await loadBooks({ silent: true });
+    render();
+  } catch (error) {
+    appendLog(normalizeError(error, "更新译后标题失败。"));
+  }
 }
 
 async function downloadArtifact(kind) {
@@ -750,11 +939,12 @@ function shouldPoll(job) {
 }
 
 async function fetchJson(url, options = {}) {
+  const isFormData = options.body instanceof FormData;
   const response = await fetch(url, {
     ...options,
     headers: {
       Accept: "application/json",
-      "Content-Type": "application/json",
+      ...(isFormData ? {} : { "Content-Type": "application/json" }),
       ...(options.headers || {}),
     },
   });
@@ -862,9 +1052,8 @@ function buildTranslationRequestPayload() {
     return {};
   }
   return {
-    provider: {
-      profileName: profileIdentifier(selectedProfile),
-    },
+    providerName: selectedProfile.provider_name || profileIdentifier(selectedProfile),
+    modelName: selectedProfile.default_model_name || null,
   };
 }
 
@@ -955,7 +1144,10 @@ function translateStatus(status) {
     case "error":
       return "失败";
     case "pending":
+    case "queued":
       return "等待中";
+    case "canceled":
+      return "已取消";
     case "idle":
       return "空闲";
     case "unknown":
@@ -963,6 +1155,29 @@ function translateStatus(status) {
     default:
       return status || "-";
   }
+}
+
+function bookStatusClass(status) {
+  switch ((status || "").toLowerCase()) {
+    case "running":
+    case "pending":
+      return "running";
+    case "completed":
+      return "done";
+    case "failed":
+      return "failed";
+    default:
+      return "running";
+  }
+}
+
+function bookCoverInitials(book) {
+  const title = displayBookTitle(book) || book?.filename || "FB";
+  return String(title).trim().slice(0, 2).toUpperCase();
+}
+
+function setApiConnectionStatus(isConnected) {
+  elements.apiConnectionLabel.innerHTML = `<span class="status-dot"></span>${isConnected ? "已连接" : "未连接"}`;
 }
 
 function translateArtifactKind(kind) {
@@ -1062,20 +1277,5 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
-}
-
-function fileToBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = String(reader.result || "");
-      const [, base64 = ""] = result.split(",", 2);
-      resolve(base64);
-    };
-    reader.onerror = () => {
-      reject(new Error(`无法读取文件 ${file.name}。`));
-    };
-    reader.readAsDataURL(file);
-  });
 }
 

@@ -10,6 +10,7 @@ import com.fanbook.common.error.ErrorCode;
 import com.fanbook.common.error.FanbookException;
 import java.util.Map;
 import java.util.concurrent.Semaphore;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -32,8 +33,9 @@ public class OpenAiCompatibleProvider implements AiTranslationProvider {
     private final OpenAiCompatibleProperties properties;
     private final Semaphore semaphore;
 
-    public OpenAiCompatibleProvider(RestClient.Builder builder, OpenAiCompatibleProperties properties) {
-        this(builder, JsonMapper.builder().build(), properties);
+    @Autowired
+    public OpenAiCompatibleProvider(OpenAiCompatibleProperties properties) {
+        this(RestClient.builder(), JsonMapper.builder().build(), properties);
     }
 
     OpenAiCompatibleProvider(
