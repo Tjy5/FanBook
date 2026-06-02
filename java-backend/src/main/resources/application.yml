@@ -25,6 +25,12 @@ management:
     health:
       show-details: always
 
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
 fanbook:
   storage:
     root: ${FANBOOK_STORAGE_ROOT:./runtime/storage}

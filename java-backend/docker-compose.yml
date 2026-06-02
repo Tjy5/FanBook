@@ -1,0 +1,36 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: fanbook
+      POSTGRES_USER: fanbook
+      POSTGRES_PASSWORD: fanbook
+    ports:
+      - "5432:5432"
+    volumes:
+      - fanbook-postgres:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  backend:
+    build: .
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      FANBOOK_DATASOURCE_URL: jdbc:postgresql://postgres:5432/fanbook
+      FANBOOK_DATASOURCE_USERNAME: fanbook
+      FANBOOK_DATASOURCE_PASSWORD: fanbook
+      FANBOOK_REDIS_HOST: redis
+      FANBOOK_STORAGE_ROOT: /app/runtime/storage
+    ports:
+      - "8080:8080"
+    volumes:
+      - fanbook-storage:/app/runtime/storage
+
+volumes:
+  fanbook-postgres:
+  fanbook-storage:
