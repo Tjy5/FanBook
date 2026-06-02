@@ -36,6 +36,31 @@
 - 正式导出要求整本书全部翻译完成后才能生成
 - 这是本地单用户应用，不是面向多租户部署的平台
 
+## Java 后端重构版本
+
+Java 后端位于 `java-backend/`，用于展示 Java 后端工程能力：Spring Boot、PostgreSQL、Redis、异步任务、断点恢复、结构化 AI Provider、EPUB 导出和非容器数据库测试。
+
+### 启动
+
+```bash
+cd java-backend
+docker compose up --build
+```
+
+默认地址：
+
+- API：`http://localhost:8080`
+- Health：`http://localhost:8080/actuator/health`
+- OpenAPI：`http://localhost:8080/v3/api-docs`
+- Swagger UI：`http://localhost:8080/swagger-ui/index.html`
+
+### 本地测试
+
+```bash
+cd java-backend
+mvn test
+```
+
 ## 快速开始
 
 ### 1. 克隆并安装依赖
@@ -216,6 +241,7 @@ GET  /api/books/{book_id}/reports/consistency.md
 FanBook/
 ├── backend/      # FastAPI、翻译编排、持久化、导出
 ├── frontend/     # 单页前端
+├── java-backend/ # Spring Boot 后端重构版本
 ├── tests/        # 单元测试和集成测试
 ├── .env.example  # 配置示例
 ├── main.py       # 应用入口
