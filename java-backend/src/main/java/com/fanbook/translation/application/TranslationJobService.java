@@ -17,8 +17,11 @@ import com.fanbook.translation.infrastructure.TranslationChunkRepository;
 import com.fanbook.translation.infrastructure.TranslationJobRepository;
 import java.util.List;
 import org.springframework.http.HttpStatus;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 @Service
 public class TranslationJobService {
@@ -26,20 +29,51 @@ public class TranslationJobService {
     private final SegmentRepository segmentRepository;
     private final TranslationJobRepository jobRepository;
     private final TranslationChunkRepository chunkRepository;
+    private final TranslationJobExecutor translationJobExecutor;
+    private final ThreadPoolTaskExecutor translationTaskExecutor;
     private final ObjectMapper objectMapper = JsonMapper.builder().build();
 
     public TranslationJobService(
             SegmentRepository segmentRepository,
             TranslationJobRepository jobRepository,
-            TranslationChunkRepository chunkRepository
+            TranslationChunkRepository chunkRepository,
+            TranslationJobExecutor translationJobExecutor,
+            ThreadPoolTaskExecutor translationTaskExecutor
     ) {
         this.segmentRepository = segmentRepository;
         this.jobRepository = jobRepository;
         this.chunkRepository = chunkRepository;
+        this.translationJobExecutor = translationJobExecutor;
+        this.translationTaskExecutor = translationTaskExecutor;
     }
 
     @Transactional
     public TranslationJobResponse start(Long bookId, StartTranslationRequest request, String requestedBy) {
+        TranslationJobResponse response = createQueuedJob(bookId, request, requestedBy);
+        submitAsync(response.jobId());
+        return response;
+    }
+
+    @Transactional
+    public TranslationJobResponse startWithoutDispatch(Long bookId, StartTranslationRequest request, String requestedBy) {
+        return createQueuedJob(bookId, request, requestedBy);
+    }
+
+    public void submitAsync(Long jobId) {
+        Runnable task = () -> translationJobExecutor.runJob(jobId);
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            translationTaskExecutor.execute(task);
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                translationTaskExecutor.execute(task);
+            }
+        });
+    }
+
+    private TranslationJobResponse createQueuedJob(Long bookId, StartTranslationRequest request, String requestedBy) {
         List<SegmentEntity> segments = segmentRepository.findByBookIdOrderByChapterIdAscSegmentOrderAsc(bookId);
         if (segments.isEmpty()) {
             throw new FanbookException(ErrorCode.BOOK_NOT_FOUND, HttpStatus.NOT_FOUND, "Book '" + bookId + "' was not found.");

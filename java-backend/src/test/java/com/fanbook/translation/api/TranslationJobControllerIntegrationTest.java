@@ -9,13 +9,19 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
+import com.fanbook.common.lock.BookTranslationLock;
 import com.fanbook.testsupport.MinimalEpubFactory;
 import com.fanbook.translation.infrastructure.TranslationChunkRepository;
+import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -65,5 +71,26 @@ class TranslationJobControllerIntegrationTest {
                 .andExpect(jsonPath("$.jobId").value(jobId))
                 .andReturn().getResponse().getContentAsString();
         assertThat(Set.of("QUEUED", "RUNNING", "COMPLETED")).contains(objectMapper.readTree(readBody).get("status").asText());
+    }
+
+    @TestConfiguration
+    static class LockConfig {
+        @Bean
+        @Primary
+        BookTranslationLock inMemoryBookTranslationLock() {
+            return new BookTranslationLock() {
+                private final Map<Long, Long> locks = new ConcurrentHashMap<>();
+
+                @Override
+                public boolean acquire(Long bookId, Long jobId) {
+                    return locks.putIfAbsent(bookId, jobId) == null;
+                }
+
+                @Override
+                public void release(Long bookId, Long jobId) {
+                    locks.remove(bookId, jobId);
+                }
+            };
+        }
     }
 }
