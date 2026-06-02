@@ -10,53 +10,10 @@ const state = {
   statusCounts: null,
   activeBookFilter: "all",
   pollTimer: null,
-  activity: [
-    { time: "14:35:21", message: "开始翻译: Book Three: The Prophet" },
-    { time: "14:35:18", message: "API 请求成功 (tokens: 2,048)" },
-    { time: "14:34:57", message: "段落翻译失败 (段落 ID: B3_0456)" },
-    { time: "14:34:42", message: "重试成功 (段落 ID: B3_0456)" },
-    { time: "14:33:58", message: "导出完成: 双语 EPUB (Dune_bilingual.epub)" },
-  ],
+  activity: [],
   providerProfiles: [],
   defaultProviderProfileName: null,
   selectedProviderProfileName: window.localStorage.getItem(PROVIDER_PROFILE_STORAGE_KEY),
-};
-
-const DEMO_DETAIL = {
-  book: {
-    id: "fb_20240526_0001",
-    title: "Dune",
-    translated_title: "沙丘（暂未设置）",
-    title_translation_status: "pending",
-    filename: "Dune - Frank Herbert.epub",
-    source_language: "en",
-    created_at: "2024-05-26T14:32:18",
-  },
-  current_job: {
-    status: "running",
-    progress: 0.68,
-    total_segments: 12843,
-    translated_segments: 8734,
-    failed_segments: 126,
-    estimated_remaining_seconds: 8280,
-    provider_profile_name: "默认配置",
-    provider_name: "OpenAI",
-    model_name: "gpt-4o",
-  },
-  chapters: [
-    { order: 1, title: "Prologue", total_segments: 59, translated_segments: 59, failed_segments: 0 },
-    { order: 2, title: "Book One: Dune", total_segments: 1484, translated_segments: 1484, failed_segments: 3 },
-    { order: 3, title: "Book Two: Muad'dib", total_segments: 1752, translated_segments: 1201, failed_segments: 12 },
-    { order: 4, title: "Book Three: The Prophet", total_segments: 2368, translated_segments: 1280, failed_segments: 28 },
-    { order: 5, title: "Book Four: God Emperor of Dune", total_segments: 2105, translated_segments: 1012, failed_segments: 31 },
-    { order: 6, title: "Book Five: Heretics of Dune", total_segments: 2317, translated_segments: 1095, failed_segments: 27 },
-    { order: 7, title: "Book Six: Chapterhouse: Dune", total_segments: 1758, translated_segments: 603, failed_segments: 25 },
-  ],
-  artifacts: [
-    { id: "zh-preview", kind: "zh", status: "pending", size: 0 },
-    { id: "bilingual-preview", kind: "bilingual", status: "ready", size: 3982144 },
-    { id: "consistency-preview", kind: "consistency_report", status: "ready", size: 18432 },
-  ],
 };
 
 const FALLBACK_PROVIDER_PROFILES = [
@@ -407,16 +364,15 @@ async function loadBooks(options = {}) {
 }
 
 function render() {
-  const detail = state.currentBookDetail || DEMO_DETAIL;
+  const detail = state.currentBookDetail;
   const book = detail?.book;
   const job = detail?.current_job;
-  const isPreview = !state.currentBookDetail;
 
   elements.currentBookLabel.textContent = book
-    ? `${displayBookTitle(book)}${isPreview ? "" : ` · #${book.id}`}`
+    ? `${displayBookTitle(book)} · #${book.id}`
     : "未选择";
 
-  renderBookMetadata(book, job, { isPreview });
+  renderBookMetadata(book, job);
   renderJob(job, detail?.chapters ?? []);
   renderExports(detail?.artifacts ?? []);
   renderChapters(detail?.chapters ?? [], job);
@@ -999,8 +955,7 @@ function estimateRemainingTime(job, totals, percentage) {
     return "0 分钟";
   }
 
-  const secondsPerSegment = state.currentBookDetail ? 2.2 : 2.08;
-  return formatDuration(Math.round(remaining * secondsPerSegment));
+  return formatDuration(Math.round(remaining * 2.2));
 }
 
 function formatDuration(totalSeconds) {

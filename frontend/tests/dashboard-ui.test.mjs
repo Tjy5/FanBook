@@ -106,6 +106,8 @@ for (const fragment of requiredJsFragments) {
 }
 
 const deprecatedJsFragments = [
+  "DEMO_DETAIL",
+  "Book Three: The Prophet",
   "/books/${bookId}/translate`",
   "/books/${bookId}/resume`",
   "/books/${bookId}/export/zh`",
