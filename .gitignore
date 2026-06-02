@@ -1,6 +1,5 @@
 .env
 .env.*
-!.env.example
 .codex/
 .venv/
 .pytest-run-*/
@@ -14,7 +13,7 @@ __pycache__/
 .coverage.*
 htmlcov/
 temp/
-java-backend/target/
+backend/target/
 samples/
 docs/
 reference-projects/
