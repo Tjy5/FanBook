@@ -9,9 +9,12 @@ import com.fanbook.book.domain.SegmentStatus;
 import com.fanbook.book.infrastructure.BookRepository;
 import com.fanbook.book.infrastructure.ChapterRepository;
 import com.fanbook.book.infrastructure.SegmentRepository;
+import com.fanbook.common.error.ErrorCode;
+import com.fanbook.common.error.FanbookException;
 import com.fanbook.common.storage.StorageService;
 import java.util.ArrayList;
 import java.util.List;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -40,7 +43,7 @@ public class BookApplicationService {
 
     @Transactional
     public BookResponse upload(String filename, byte[] content, String sourceLanguage) {
-        ParsedBook parsed = epubParser.parse(content);
+        ParsedBook parsed = parse(content);
         String safeFilename = filename == null || filename.isBlank() ? "uploaded.epub" : filename;
         String safeSourceLanguage = sourceLanguage == null || sourceLanguage.isBlank() ? "en" : sourceLanguage.trim();
         BookEntity book = bookRepository.save(new BookEntity(
@@ -80,5 +83,13 @@ public class BookApplicationService {
         }
         segmentRepository.saveAll(segments);
         return new BookResponse(book.getId(), book.getTitle(), book.getStatus().name(), parsed.chapters().size(), segments.size());
+    }
+
+    private ParsedBook parse(byte[] content) {
+        try {
+            return epubParser.parse(content);
+        } catch (EpubParserException exception) {
+            throw new FanbookException(ErrorCode.INVALID_EPUB, HttpStatus.BAD_REQUEST, exception.getMessage());
+        }
     }
 }
