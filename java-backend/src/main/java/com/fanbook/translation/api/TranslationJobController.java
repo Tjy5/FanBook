@@ -1,6 +1,7 @@
 package com.fanbook.translation.api;
 
 import com.fanbook.translation.application.TranslationJobService;
+import com.fanbook.translation.application.TranslationResumeService;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -14,9 +15,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class TranslationJobController {
 
     private final TranslationJobService translationJobService;
+    private final TranslationResumeService translationResumeService;
 
-    public TranslationJobController(TranslationJobService translationJobService) {
+    public TranslationJobController(TranslationJobService translationJobService, TranslationResumeService translationResumeService) {
         this.translationJobService = translationJobService;
+        this.translationResumeService = translationResumeService;
     }
 
     @PostMapping("/api/books/{bookId}/translation-jobs")
@@ -32,5 +35,19 @@ public class TranslationJobController {
     @GetMapping("/api/translation-jobs/{jobId}")
     public TranslationJobResponse get(@PathVariable Long jobId) {
         return translationJobService.get(jobId);
+    }
+
+    @PostMapping("/api/books/{bookId}/translation-jobs/resume")
+    public TranslationJobResponse resume(@PathVariable Long bookId) {
+        TranslationJobResponse response = translationResumeService.resume(bookId);
+        if ("QUEUED".equals(response.status())) {
+            translationJobService.submitAsync(response.jobId());
+        }
+        return response;
+    }
+
+    @PostMapping("/api/translation-jobs/{jobId}/cancel")
+    public TranslationJobResponse cancel(@PathVariable Long jobId) {
+        return translationJobService.cancel(jobId);
     }
 }

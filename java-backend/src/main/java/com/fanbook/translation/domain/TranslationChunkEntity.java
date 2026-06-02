@@ -156,6 +156,14 @@ public class TranslationChunkEntity {
         this.attemptCount++;
     }
 
+    public void markPending() {
+        this.status = TranslationChunkStatus.PENDING;
+        this.startedAt = null;
+        this.finishedAt = null;
+        this.lastErrorCode = null;
+        this.lastErrorMessage = null;
+    }
+
     public void markCompleted(OffsetDateTime finishedAt) {
         this.status = TranslationChunkStatus.COMPLETED;
         this.finishedAt = finishedAt;

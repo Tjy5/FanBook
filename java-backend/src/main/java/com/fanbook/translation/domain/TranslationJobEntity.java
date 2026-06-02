@@ -148,6 +148,12 @@ public class TranslationJobEntity {
         this.startedAt = startedAt;
     }
 
+    public void markQueued() {
+        this.status = TranslationJobStatus.QUEUED;
+        this.finishedAt = null;
+        this.errorSummary = null;
+    }
+
     public void updateProgress(int totalSegments, int translatedSegments, int failedSegments, double progress) {
         this.totalSegments = totalSegments;
         this.translatedSegments = translatedSegments;
@@ -164,6 +170,11 @@ public class TranslationJobEntity {
     public void markFailed(String errorSummary, OffsetDateTime finishedAt) {
         this.status = TranslationJobStatus.FAILED;
         this.errorSummary = errorSummary;
+        this.finishedAt = finishedAt;
+    }
+
+    public void markCanceled(OffsetDateTime finishedAt) {
+        this.status = TranslationJobStatus.CANCELED;
         this.finishedAt = finishedAt;
     }
 }

@@ -15,6 +15,7 @@ import com.fanbook.translation.domain.TranslationJobEntity;
 import com.fanbook.translation.domain.TranslationJobStatus;
 import com.fanbook.translation.infrastructure.TranslationChunkRepository;
 import com.fanbook.translation.infrastructure.TranslationJobRepository;
+import java.time.OffsetDateTime;
 import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
@@ -112,14 +113,18 @@ public class TranslationJobService {
     @Transactional(readOnly = true)
     public TranslationJobResponse get(Long jobId) {
         return jobRepository.findById(jobId).map(this::toResponse)
-                .orElseThrow(() -> new FanbookException(
-                        ErrorCode.TRANSLATION_JOB_NOT_FOUND,
-                        HttpStatus.NOT_FOUND,
-                        "Translation job '" + jobId + "' was not found."
-                ));
+                .orElseThrow(() -> notFound("Translation job '" + jobId + "' was not found."));
     }
 
-    private TranslationJobResponse toResponse(TranslationJobEntity job) {
+    @Transactional
+    public TranslationJobResponse cancel(Long jobId) {
+        TranslationJobEntity job = jobRepository.findById(jobId)
+                .orElseThrow(() -> notFound("Translation job '" + jobId + "' was not found."));
+        job.markCanceled(OffsetDateTime.now());
+        return toResponse(job);
+    }
+
+    TranslationJobResponse toResponse(TranslationJobEntity job) {
         return new TranslationJobResponse(
                 job.getId(),
                 job.getBook().getId(),
@@ -131,6 +136,10 @@ public class TranslationJobService {
                 job.getTranslatedSegments(),
                 job.getFailedSegments()
         );
+    }
+
+    FanbookException notFound(String message) {
+        return new FanbookException(ErrorCode.TRANSLATION_JOB_NOT_FOUND, HttpStatus.NOT_FOUND, message);
     }
 
     private static String value(String candidate, String fallback) {
