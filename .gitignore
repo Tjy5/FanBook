@@ -1,6 +1,8 @@
 .env
 .env.*
 .codex/
+.claude/
+.antigravity/
 .venv/
 .pytest-run-*/
 pytest-cache-files-*/
@@ -14,8 +16,12 @@ __pycache__/
 htmlcov/
 temp/
 backend/target/
+backend/runtime/
 samples/
 docs/
 reference-projects/
+CLAUDE.md
 PROJECT.md
 AGENTS.md
+STARTUP.md
+fanbook首页.png

@@ -1,8 +1,12 @@
 spring:
   application:
     name: fanbook-java-backend
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 50MB
   datasource:
-    url: ${FANBOOK_DATASOURCE_URL:jdbc:postgresql://localhost:5432/fanbook}
+    url: ${FANBOOK_DATASOURCE_URL:jdbc:mysql://localhost:3306/fanbook?serverTimezone=UTC}
     username: ${FANBOOK_DATASOURCE_USERNAME:fanbook}
     password: ${FANBOOK_DATASOURCE_PASSWORD:fanbook}
   data:
@@ -15,6 +19,10 @@ spring:
     hibernate:
       ddl-auto: validate
     open-in-view: false
+    properties:
+      hibernate:
+        timezone:
+          default_storage: NORMALIZE
 
 management:
   endpoints:

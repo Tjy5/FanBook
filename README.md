@@ -38,19 +38,36 @@
 
 - Java 21
 - Maven 3.9+
-- Docker 与 Docker Compose（用于本地 PostgreSQL / Redis 编排）
+- Node.js 18+（用于本地前端静态服务和 API 代理）
+- Docker 与 Docker Compose（用于 MySQL、Redis 和后端服务编排）
 
-本仓库在自动化测试中使用 H2 PostgreSQL compatibility mode，不要求 Docker 作为测试前置。
+本仓库在自动化测试中使用 H2 MySQL compatibility mode。生产近似本地运行可使用 Docker Compose；快速开发调试也提供 `local` profile。
 
 ### 启动本地服务
+
+Docker Compose 后端：
 
 ```bash
 cd backend
 docker compose up --build
 ```
 
+本地直启后端：
+
+```bash
+cd backend
+mvn spring-boot:run -Dspring-boot.run.profiles=local
+```
+
+前端：
+
+```bash
+node frontend/dev-server.mjs --port=5173 --backend=http://localhost:8080
+```
+
 默认地址：
 
+- 前端：`http://localhost:5173`
 - API：`http://localhost:8080`
 - Health：`http://localhost:8080/actuator/health`
 - OpenAPI：`http://localhost:8080/v3/api-docs`
@@ -68,7 +85,7 @@ mvn test
 `backend/src/main/resources/application.yml` 提供本地默认值。常用环境变量如下：
 
 ```bash
-FANBOOK_DATASOURCE_URL=jdbc:postgresql://localhost:5432/fanbook
+FANBOOK_DATASOURCE_URL=jdbc:mysql://localhost:3306/fanbook?serverTimezone=UTC
 FANBOOK_DATASOURCE_USERNAME=fanbook
 FANBOOK_DATASOURCE_PASSWORD=fanbook
 FANBOOK_REDIS_HOST=localhost
@@ -121,7 +138,7 @@ GET  /v3/api-docs
 
 ### 3. 持久化与恢复
 
-翻译状态写入 PostgreSQL，本地文件 storage 保存原始 EPUB、导出 EPUB 和一致性报告。任务中断后可以恢复，不需要从头开始。
+翻译状态写入 MySQL，本地文件 storage 保存原始 EPUB、导出 EPUB 和一致性报告。任务中断后可以恢复，不需要从头开始。
 
 ### 4. 导出
 
@@ -151,7 +168,7 @@ FanBook/
 
 - 当前主链路围绕 EPUB 设计，不是通用多格式导入器。
 - Java 后端包结构按 `book`、`translation`、`ai`、`export`、`storage`、`common` 划分。
-- 自动化测试不依赖 Docker；本地运行时通过 Docker Compose 编排 PostgreSQL、Redis 和后端服务。
+- 自动化测试使用 H2 的 MySQL 兼容模式；生产近似本地运行可通过 Docker Compose 编排 MySQL、Redis 和后端服务。
 - 扩展模型接入时，优先从 `backend/src/main/java/com/fanbook/ai/` 开始。
 
 ## License

@@ -38,7 +38,7 @@ public class TranslationChunkEntity {
     @Column(name = "chunk_order", nullable = false)
     private int chunkOrder;
 
-    @Column(name = "segment_ids_json", nullable = false, columnDefinition = "TEXT")
+    @Column(name = "segment_ids_json", nullable = false, columnDefinition = "LONGTEXT")
     private String segmentIdsJson;
 
     @Enumerated(EnumType.STRING)
@@ -54,19 +54,19 @@ public class TranslationChunkEntity {
     @Column(name = "last_error_code", length = 64)
     private String lastErrorCode;
 
-    @Column(name = "last_error_message", columnDefinition = "TEXT")
+    @Column(name = "last_error_message", columnDefinition = "LONGTEXT")
     private String lastErrorMessage;
 
-    @Column(name = "started_at", columnDefinition = "TIMESTAMP WITH TIME ZONE")
+    @Column(name = "started_at", columnDefinition = "DATETIME(6)")
     private OffsetDateTime startedAt;
 
-    @Column(name = "finished_at", columnDefinition = "TIMESTAMP WITH TIME ZONE")
+    @Column(name = "finished_at", columnDefinition = "DATETIME(6)")
     private OffsetDateTime finishedAt;
 
-    @Column(name = "created_at", nullable = false, insertable = false, updatable = false, columnDefinition = "TIMESTAMP WITH TIME ZONE")
+    @Column(name = "created_at", nullable = false, insertable = false, updatable = false, columnDefinition = "DATETIME(6)")
     private OffsetDateTime createdAt;
 
-    @Column(name = "updated_at", nullable = false, insertable = false, updatable = false, columnDefinition = "TIMESTAMP WITH TIME ZONE")
+    @Column(name = "updated_at", nullable = false, insertable = false, updatable = false, columnDefinition = "DATETIME(6)")
     private OffsetDateTime updatedAt;
 
     protected TranslationChunkEntity() {

@@ -66,6 +66,8 @@ const elements = {
   remainingSegments: document.querySelector("#remaining-segments"),
   bookList: document.querySelector("#book-list"),
   libraryTabs: document.querySelector(".library-tabs"),
+  bookFileInput: document.querySelector("#book-file"),
+  uploadDropzone: document.querySelector(".upload-dropzone"),
 };
 
 const endpoint = {
@@ -109,6 +111,26 @@ function bindEvents() {
   elements.lookupForm.addEventListener("submit", onLookupSubmit);
   elements.translationForm.addEventListener("submit", onTranslateSubmit);
   elements.translationProviderProfileSelect.addEventListener("change", onProviderProfileChange);
+
+  if (elements.bookFileInput) {
+    elements.bookFileInput.addEventListener("change", (event) => {
+      const file = event.target.files?.[0];
+      const tip = document.querySelector("#upload-tip");
+      if (tip) {
+        if (file) {
+          tip.textContent = file.name;
+          if (elements.uploadDropzone) {
+            elements.uploadDropzone.style.borderColor = "var(--accent)";
+          }
+        } else {
+          tip.textContent = "上传 EPUB";
+          if (elements.uploadDropzone) {
+            elements.uploadDropzone.style.borderColor = "";
+          }
+        }
+      }
+    });
+  }
   elements.refreshButton.addEventListener("click", () => {
     if (state.currentBookId) {
       void loadBook(state.currentBookId, { silent: false });
@@ -201,6 +223,14 @@ async function onUploadSubmit(event) {
 
     appendLog(`上传完成，已创建书籍 #${createdBookId}。`);
     elements.bookIdInput.value = String(createdBookId);
+    elements.uploadForm.reset();
+    const tip = document.querySelector("#upload-tip");
+    if (tip) {
+      tip.textContent = "上传 EPUB";
+    }
+    if (elements.uploadDropzone) {
+      elements.uploadDropzone.style.borderColor = "";
+    }
     await loadBooks({ silent: true });
     await loadBook(createdBookId, { silent: true });
   } catch (error) {
@@ -372,6 +402,15 @@ function render() {
     ? `${displayBookTitle(book)} · #${book.id}`
     : "未选择";
 
+  const bigBookCover = document.querySelector("#book-cover");
+  if (bigBookCover && book) {
+    bigBookCover.style.background = getBookCoverStyle(book);
+    const coverSpan = bigBookCover.querySelector("span");
+    if (coverSpan) {
+      coverSpan.textContent = bookCoverInitials(book);
+    }
+  }
+
   renderBookMetadata(book, job);
   renderJob(job, detail?.chapters ?? []);
   renderExports(detail?.artifacts ?? []);
@@ -453,9 +492,10 @@ function renderBookList() {
     .map((book) => {
       const status = String(book.status || "pending").toLowerCase();
       const activeClass = Number(book.id) === Number(state.currentBookId) ? " active" : "";
+      const coverStyle = getBookCoverStyle(book);
       return `
         <article class="book-row${activeClass}" data-book-id="${escapeHtml(book.id)}" role="button" tabindex="0">
-          <div class="mini-cover" aria-hidden="true"><span>${escapeHtml(bookCoverInitials(book))}</span></div>
+          <div class="mini-cover" style="background: ${coverStyle};" aria-hidden="true"><span>${escapeHtml(bookCoverInitials(book))}</span></div>
           <div>
             <h2>${escapeHtml(displayBookTitle(book) || "未命名书籍")}</h2>
             <p>${escapeHtml(book.filename || "-")}</p>
@@ -1232,5 +1272,21 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function getBookCoverStyle(book) {
+  const id = Number(book?.id) || 0;
+  const gradients = [
+    "linear-gradient(135deg, #1e3c72, #2a5298)",
+    "linear-gradient(135deg, #3a1c71, #d76d77, #ffaf7b)",
+    "linear-gradient(135deg, #0f2027, #203a43, #2c5364)",
+    "linear-gradient(135deg, #11998e, #38ef7d)",
+    "linear-gradient(135deg, #fc466b, #3f5efb)",
+    "linear-gradient(135deg, #7f00ff, #e100ff)",
+    "linear-gradient(135deg, #ff007f, #ff00ff)",
+    "linear-gradient(135deg, #00c6ff, #0072ff)",
+    "linear-gradient(135deg, #f12711, #f5af19)"
+  ];
+  return gradients[id % gradients.length];
 }
 

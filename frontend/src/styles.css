@@ -447,6 +447,13 @@ button {
   border-radius: 5px;
   box-shadow: 0 8px 18px rgba(18, 35, 52, 0.18);
   border: 1px solid rgba(255, 255, 255, 0.5);
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-weight: 700;
+  font-size: 13px;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  background: linear-gradient(135deg, #78909c, #37474f);
 }
 
 .dune-cover {
@@ -1007,6 +1014,47 @@ button {
   padding: 18px;
   color: var(--muted);
   text-align: center;
+}
+
+.workspace-empty-state {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  height: 100%;
+  min-height: 400px;
+  padding: 40px;
+  color: var(--muted);
+}
+
+.workspace-empty-state .empty-icon {
+  font-size: 64px;
+  margin-bottom: 20px;
+  filter: drop-shadow(0 4px 10px rgba(35, 74, 104, 0.15));
+}
+
+.workspace-empty-state h2 {
+  font-size: 22px;
+  color: var(--text);
+  margin: 0 0 10px;
+  font-weight: 700;
+}
+
+.workspace-empty-state p {
+  margin: 0;
+  max-width: 360px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.workspace-main.is-empty .workspace-empty-state {
+  display: flex;
+}
+
+.workspace-main.is-empty .workspace-toolbar,
+.workspace-main.is-empty .workspace-grid {
+  display: none;
 }
 
 .text-button {

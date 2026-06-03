@@ -51,19 +51,19 @@ public class TranslationJobEntity {
     @Column(name = "requested_by", length = 128)
     private String requestedBy;
 
-    @Column(name = "started_at", columnDefinition = "TIMESTAMP WITH TIME ZONE")
+    @Column(name = "started_at", columnDefinition = "DATETIME(6)")
     private OffsetDateTime startedAt;
 
-    @Column(name = "finished_at", columnDefinition = "TIMESTAMP WITH TIME ZONE")
+    @Column(name = "finished_at", columnDefinition = "DATETIME(6)")
     private OffsetDateTime finishedAt;
 
-    @Column(name = "error_summary", columnDefinition = "TEXT")
+    @Column(name = "error_summary", columnDefinition = "LONGTEXT")
     private String errorSummary;
 
-    @Column(name = "created_at", nullable = false, insertable = false, updatable = false, columnDefinition = "TIMESTAMP WITH TIME ZONE")
+    @Column(name = "created_at", nullable = false, insertable = false, updatable = false, columnDefinition = "DATETIME(6)")
     private OffsetDateTime createdAt;
 
-    @Column(name = "updated_at", nullable = false, insertable = false, updatable = false, columnDefinition = "TIMESTAMP WITH TIME ZONE")
+    @Column(name = "updated_at", nullable = false, insertable = false, updatable = false, columnDefinition = "DATETIME(6)")
     private OffsetDateTime updatedAt;
 
     protected TranslationJobEntity() {

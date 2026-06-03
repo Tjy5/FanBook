@@ -32,10 +32,10 @@ public class SegmentEntity {
     @Column(name = "segment_order", nullable = false)
     private int segmentOrder;
 
-    @Column(name = "source_text", nullable = false, columnDefinition = "TEXT")
+    @Column(name = "source_text", nullable = false, columnDefinition = "LONGTEXT")
     private String sourceText;
 
-    @Column(name = "translated_text", columnDefinition = "TEXT")
+    @Column(name = "translated_text", columnDefinition = "LONGTEXT")
     private String translatedText;
 
     @Enumerated(EnumType.STRING)
@@ -46,7 +46,7 @@ public class SegmentEntity {
     @Column(nullable = false, length = 32)
     private SegmentStatus status;
 
-    @Column(name = "locator_json", nullable = false, columnDefinition = "TEXT")
+    @Column(name = "locator_json", nullable = false, columnDefinition = "LONGTEXT")
     private String locatorJson;
 
     @Column(name = "source_digest", nullable = false, length = 64)
@@ -58,13 +58,13 @@ public class SegmentEntity {
     @Column(name = "last_error_code", length = 64)
     private String lastErrorCode;
 
-    @Column(name = "last_error_message", columnDefinition = "TEXT")
+    @Column(name = "last_error_message", columnDefinition = "LONGTEXT")
     private String lastErrorMessage;
 
-    @Column(name = "created_at", nullable = false, insertable = false, updatable = false, columnDefinition = "TIMESTAMP WITH TIME ZONE")
+    @Column(name = "created_at", nullable = false, insertable = false, updatable = false, columnDefinition = "DATETIME(6)")
     private OffsetDateTime createdAt;
 
-    @Column(name = "updated_at", nullable = false, insertable = false, updatable = false, columnDefinition = "TIMESTAMP WITH TIME ZONE")
+    @Column(name = "updated_at", nullable = false, insertable = false, updatable = false, columnDefinition = "DATETIME(6)")
     private OffsetDateTime updatedAt;
 
     protected SegmentEntity() {

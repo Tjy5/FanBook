@@ -2,9 +2,11 @@ package com.fanbook.common.lock;
 
 import java.time.Duration;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 @Component
+@Profile("!local")
 public class RedisBookTranslationLock implements BookTranslationLock {
 
     private static final Duration LOCK_TTL = Duration.ofMinutes(30);

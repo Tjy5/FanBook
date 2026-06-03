@@ -18,29 +18,29 @@ public class BookEntity {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable = false, columnDefinition = "TEXT")
+    @Column(nullable = false, columnDefinition = "LONGTEXT")
     private String filename;
 
-    @Column(nullable = false, columnDefinition = "TEXT")
+    @Column(nullable = false, columnDefinition = "LONGTEXT")
     private String title;
 
-    @Column(name = "translated_title", columnDefinition = "TEXT")
+    @Column(name = "translated_title", columnDefinition = "LONGTEXT")
     private String translatedTitle;
 
     @Column(name = "source_language", nullable = false, length = 16)
     private String sourceLanguage;
 
-    @Column(name = "source_object_key", nullable = false, columnDefinition = "TEXT")
+    @Column(name = "source_object_key", nullable = false, columnDefinition = "LONGTEXT")
     private String sourceObjectKey;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 32)
     private BookStatus status;
 
-    @Column(name = "created_at", nullable = false, insertable = false, updatable = false, columnDefinition = "TIMESTAMP WITH TIME ZONE")
+    @Column(name = "created_at", nullable = false, insertable = false, updatable = false, columnDefinition = "DATETIME(6)")
     private OffsetDateTime createdAt;
 
-    @Column(name = "updated_at", nullable = false, insertable = false, updatable = false, columnDefinition = "TIMESTAMP WITH TIME ZONE")
+    @Column(name = "updated_at", nullable = false, insertable = false, updatable = false, columnDefinition = "DATETIME(6)")
     private OffsetDateTime updatedAt;
 
     protected BookEntity() {

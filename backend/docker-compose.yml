@@ -1,14 +1,21 @@
 services:
-  postgres:
-    image: postgres:17-alpine
+  mysql:
+    image: mysql:8.4
     environment:
-      POSTGRES_DB: fanbook
-      POSTGRES_USER: fanbook
-      POSTGRES_PASSWORD: fanbook
+      MYSQL_DATABASE: fanbook
+      MYSQL_USER: fanbook
+      MYSQL_PASSWORD: fanbook
+      MYSQL_ROOT_PASSWORD: fanbook-root
+    command: ["mysqld", "--character-set-server=utf8mb4", "--collation-server=utf8mb4_0900_ai_ci"]
     ports:
-      - "5432:5432"
+      - "3306:3306"
     volumes:
-      - fanbook-postgres:/var/lib/postgresql/data
+      - fanbook-mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -pfanbook-root --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
   redis:
     image: redis:7-alpine
@@ -18,10 +25,12 @@ services:
   backend:
     build: .
     depends_on:
-      - postgres
-      - redis
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_started
     environment:
-      FANBOOK_DATASOURCE_URL: jdbc:postgresql://postgres:5432/fanbook
+      FANBOOK_DATASOURCE_URL: jdbc:mysql://mysql:3306/fanbook?serverTimezone=UTC
       FANBOOK_DATASOURCE_USERNAME: fanbook
       FANBOOK_DATASOURCE_PASSWORD: fanbook
       FANBOOK_REDIS_HOST: redis
@@ -32,5 +41,5 @@ services:
       - fanbook-storage:/app/runtime/storage
 
 volumes:
-  fanbook-postgres:
+  fanbook-mysql:
   fanbook-storage:

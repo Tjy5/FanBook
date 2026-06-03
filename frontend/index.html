@@ -49,82 +49,24 @@
           </form>
 
           <div class="library-tabs" aria-label="书籍状态筛选">
-            <button class="tab-button active" type="button">全部 <span>12</span></button>
-            <button class="tab-button" type="button">进行中 <span>3</span></button>
-            <button class="tab-button" type="button">已完成 <span>7</span></button>
-            <button class="tab-button" type="button">失败 <span>2</span></button>
+            <button class="tab-button active" type="button" data-filter="all">全部 <span>0</span></button>
+            <button class="tab-button" type="button" data-filter="running">进行中 <span>0</span></button>
+            <button class="tab-button" type="button" data-filter="completed">已完成 <span>0</span></button>
+            <button class="tab-button" type="button" data-filter="failed">失败 <span>0</span></button>
           </div>
 
           <div id="book-list" class="book-list" aria-label="书籍列表">
-            <article class="book-row active">
-              <div class="mini-cover dune-cover" aria-hidden="true"></div>
-              <div>
-                <h2>Dune</h2>
-                <p>Frank Herbert</p>
-                <span>英文 → 中文</span>
-              </div>
-              <time>2 分钟前</time>
-              <strong class="book-status running">进行中</strong>
-            </article>
-
-            <article class="book-row">
-              <div class="mini-cover pragmatic-cover" aria-hidden="true"></div>
-              <div>
-                <h2>The Pragmatic Programmer</h2>
-                <p>Andrew Hunt, David Thomas</p>
-                <span>英文 → 中文</span>
-              </div>
-              <time>3 小时前</time>
-              <strong class="book-status done">已完成</strong>
-            </article>
-
-            <article class="book-row">
-              <div class="mini-cover clean-cover" aria-hidden="true"></div>
-              <div>
-                <h2>Clean Code</h2>
-                <p>Robert C. Martin</p>
-                <span>英文 → 中文</span>
-              </div>
-              <time>昨天 22:15</time>
-              <strong class="book-status done">已完成</strong>
-            </article>
-
-            <article class="book-row">
-              <div class="mini-cover thinking-cover" aria-hidden="true"></div>
-              <div>
-                <h2>Thinking, Fast and Slow</h2>
-                <p>Daniel Kahneman</p>
-                <span>英文 → 中文</span>
-              </div>
-              <time>昨天 18:34</time>
-              <strong class="book-status done">已完成</strong>
-            </article>
-
-            <article class="book-row">
-              <div class="mini-cover hobbit-cover" aria-hidden="true"></div>
-              <div>
-                <h2>The Hobbit</h2>
-                <p>J.R.R. Tolkien</p>
-                <span>英文 → 中文</span>
-              </div>
-              <time>昨天 16:20</time>
-              <strong class="book-status failed">失败</strong>
-            </article>
-
-            <article class="book-row">
-              <div class="mini-cover orwell-cover" aria-hidden="true"></div>
-              <div>
-                <h2>1984</h2>
-                <p>George Orwell</p>
-                <span>英文 → 中文</span>
-              </div>
-              <time>昨天 10:11</time>
-              <strong class="book-status done">已完成</strong>
-            </article>
+            <div class="empty-state">正在加载书籍列表...</div>
           </div>
         </aside>
 
         <section id="book-detail-panel" class="workspace-main">
+          <div class="workspace-empty-state">
+            <span class="empty-icon" aria-hidden="true">📖</span>
+            <h2>请选择或上传一本书</h2>
+            <p>从左侧书籍库选择一本已有书籍，或在右侧上传 EPUB 文件开始翻译工作。</p>
+          </div>
+
           <nav class="workspace-toolbar" aria-label="当前书籍导航">
             <button class="icon-button" type="button" aria-label="返回书籍列表">←</button>
             <strong id="current-book-label">Dune</strong>
@@ -265,7 +207,7 @@
             <form id="upload-form" class="upload-form">
               <label class="upload-dropzone">
                 <span aria-hidden="true">⇧</span>
-                上传 EPUB
+                <span id="upload-tip">上传 EPUB</span>
                 <input id="book-file" name="book-file" type="file" accept=".epub" required />
               </label>
 

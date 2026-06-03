@@ -26,10 +26,10 @@ public class ChapterEntity {
     @Column(name = "chapter_order", nullable = false)
     private int chapterOrder;
 
-    @Column(nullable = false, columnDefinition = "TEXT")
+    @Column(nullable = false, columnDefinition = "LONGTEXT")
     private String title;
 
-    @Column(name = "source_doc_path", nullable = false, columnDefinition = "TEXT")
+    @Column(name = "source_doc_path", nullable = false, columnDefinition = "LONGTEXT")
     private String sourceDocPath;
 
     @Column(name = "total_segments", nullable = false)
@@ -41,10 +41,10 @@ public class ChapterEntity {
     @Column(name = "failed_segments", nullable = false)
     private int failedSegments;
 
-    @Column(name = "created_at", nullable = false, insertable = false, updatable = false, columnDefinition = "TIMESTAMP WITH TIME ZONE")
+    @Column(name = "created_at", nullable = false, insertable = false, updatable = false, columnDefinition = "DATETIME(6)")
     private OffsetDateTime createdAt;
 
-    @Column(name = "updated_at", nullable = false, insertable = false, updatable = false, columnDefinition = "TIMESTAMP WITH TIME ZONE")
+    @Column(name = "updated_at", nullable = false, insertable = false, updatable = false, columnDefinition = "DATETIME(6)")
     private OffsetDateTime updatedAt;
 
     protected ChapterEntity() {

@@ -34,10 +34,10 @@ public class ExportArtifactEntity {
     @Column(nullable = false, length = 32)
     private ExportArtifactStatus status;
 
-    @Column(name = "object_key", columnDefinition = "TEXT")
+    @Column(name = "object_key", columnDefinition = "LONGTEXT")
     private String objectKey;
 
-    @Column(nullable = false, columnDefinition = "TEXT")
+    @Column(nullable = false, columnDefinition = "LONGTEXT")
     private String filename;
 
     @Column(name = "size_bytes")
@@ -46,7 +46,7 @@ public class ExportArtifactEntity {
     @Column(length = 128)
     private String checksum;
 
-    @Column(name = "created_at", nullable = false, insertable = false, updatable = false, columnDefinition = "TIMESTAMP WITH TIME ZONE")
+    @Column(name = "created_at", nullable = false, insertable = false, updatable = false, columnDefinition = "DATETIME(6)")
     private OffsetDateTime createdAt;
 
     protected ExportArtifactEntity() {
