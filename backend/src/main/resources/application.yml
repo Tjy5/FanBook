@@ -13,6 +13,11 @@ spring:
     redis:
       host: ${FANBOOK_REDIS_HOST:localhost}
       port: ${FANBOOK_REDIS_PORT:6379}
+  rabbitmq:
+    host: ${FANBOOK_RABBITMQ_HOST:localhost}
+    port: ${FANBOOK_RABBITMQ_PORT:5672}
+    username: ${FANBOOK_RABBITMQ_USERNAME:fanbook}
+    password: ${FANBOOK_RABBITMQ_PASSWORD:fanbook}
   flyway:
     enabled: true
   jpa:
@@ -46,6 +51,18 @@ fanbook:
     executor:
       core-pool-size: 2
       max-pool-size: 4
+    messaging:
+      exchange: fanbook.jobs
+      chunk-queue: translation.chunk.queue
+      retry-queue: translation.chunk.retry
+      dead-letter-queue: translation.chunk.dlq
+      routing-key: translation.chunk
+      prefetch: 2
+      concurrency: 4
+    recovery:
+      chunk-lease: 10m
+      scan-delay: 60s
+      stale-job-threshold: 30m
     chunk-target-characters: 6000
     max-segments-per-chunk: 40
     max-attempts-per-chunk: 3

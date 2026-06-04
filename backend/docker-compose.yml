@@ -22,6 +22,15 @@ services:
     ports:
       - "6379:6379"
 
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    environment:
+      RABBITMQ_DEFAULT_USER: fanbook
+      RABBITMQ_DEFAULT_PASS: fanbook
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
   backend:
     build: .
     depends_on:
@@ -29,11 +38,16 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
+      rabbitmq:
+        condition: service_started
     environment:
       FANBOOK_DATASOURCE_URL: jdbc:mysql://mysql:3306/fanbook?serverTimezone=UTC
       FANBOOK_DATASOURCE_USERNAME: fanbook
       FANBOOK_DATASOURCE_PASSWORD: fanbook
       FANBOOK_REDIS_HOST: redis
+      FANBOOK_RABBITMQ_HOST: rabbitmq
+      FANBOOK_RABBITMQ_USERNAME: fanbook
+      FANBOOK_RABBITMQ_PASSWORD: fanbook
       FANBOOK_STORAGE_ROOT: /app/runtime/storage
     ports:
       - "8080:8080"

@@ -32,6 +32,14 @@ class LocalProfileContextTest {
     }
 
     @Test
+    void localProfileLoadsMessagingProperties() {
+        assertThat(environment.getProperty("fanbook.translation.messaging.chunk-queue"))
+                .isEqualTo("translation.chunk.queue");
+        assertThat(environment.getProperty("fanbook.translation.recovery.chunk-lease"))
+                .isEqualTo("10m");
+    }
+
+    @Test
     void localProfileLockUsesInMemoryOwnershipRules() {
         assertThat(lock.acquire(1L, 100L)).isTrue();
         assertThat(lock.acquire(1L, 101L)).isFalse();
