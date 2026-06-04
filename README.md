@@ -23,13 +23,14 @@
 - 支持 Redis 书籍级任务锁、任务取消、失败恢复和断点续跑。
 - 支持 mock Provider 和 OpenAI-compatible Provider。
 - 支持中文 EPUB、双语 EPUB、JSON / Markdown 一致性报告导出。
+- 提供在线阅读器，可按章节查看原文、译文或双语内容，并为段落创建笔记与导出 Markdown。
 - 提供 Actuator 健康检查、OpenAPI 文档和 Docker Compose 本地运行配置。
 
 ## 当前边界
 
 - 当前正式输入格式只有 `.epub`。
 - 当前目标语言固定为中文。
-- 第一阶段是本地单用户后端，不包含多用户登录、复杂前端、MQ 消费者或 MinIO profile。
+- 第一阶段是本地单用户工具，不包含多用户登录、复杂权限或 MinIO profile。
 - 真实模型接入通过 OpenAI-compatible Provider 配置，默认测试路径使用 mock Provider。
 
 ## 快速开始
@@ -39,13 +40,13 @@
 - Java 21
 - Maven 3.9+
 - Node.js 18+（用于本地前端静态服务和 API 代理）
-- Docker 与 Docker Compose（用于 MySQL、Redis 和后端服务编排）
+- Docker 与 Docker Compose（用于 MySQL、Redis、RabbitMQ 和后端服务编排）
 
 本仓库在自动化测试中使用 H2 MySQL compatibility mode。生产近似本地运行可使用 Docker Compose；快速开发调试也提供 `local` profile。
 
 ### 启动本地服务
 
-Docker Compose 后端：
+Docker Compose 后端包含 MySQL、Redis、RabbitMQ 和 Spring Boot 服务：
 
 ```bash
 cd backend
@@ -64,6 +65,8 @@ mvn spring-boot:run -Dspring-boot.run.profiles=local
 ```bash
 node frontend/dev-server.mjs --port=5173 --backend=http://localhost:8080
 ```
+
+加载一本书后，前端主页可以按章节阅读原文、译文或双语内容，并为段落创建笔记。
 
 默认地址：
 
@@ -90,6 +93,10 @@ FANBOOK_DATASOURCE_USERNAME=fanbook
 FANBOOK_DATASOURCE_PASSWORD=fanbook
 FANBOOK_REDIS_HOST=localhost
 FANBOOK_REDIS_PORT=6379
+FANBOOK_RABBITMQ_HOST=localhost
+FANBOOK_RABBITMQ_PORT=5672
+FANBOOK_RABBITMQ_USERNAME=fanbook
+FANBOOK_RABBITMQ_PASSWORD=fanbook
 FANBOOK_STORAGE_ROOT=./runtime/storage
 FANBOOK_AI_PROVIDER=mock
 FANBOOK_AI_BASE_URL=https://api.openai.com/v1
@@ -116,6 +123,14 @@ POST /api/books/{bookId}/translation-jobs
 GET  /api/translation-jobs/{jobId}
 POST /api/books/{bookId}/translation-jobs/resume
 POST /api/translation-jobs/{jobId}/cancel
+GET  /api/books/{bookId}/reader/info
+GET  /api/books/{bookId}/chapters
+GET  /api/books/{bookId}/chapters/{chapterId}/segments?mode=bilingual
+POST /api/segments/{segmentId}/notes
+GET  /api/segments/{segmentId}/notes
+PUT  /api/notes/{noteId}
+DELETE /api/notes/{noteId}
+GET  /api/books/{bookId}/notes/export
 GET  /api/books/{bookId}/exports/zh
 GET  /api/books/{bookId}/exports/bilingual
 GET  /api/books/{bookId}/reports/consistency

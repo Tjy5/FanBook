@@ -48,6 +48,7 @@ services:
       FANBOOK_RABBITMQ_HOST: rabbitmq
       FANBOOK_RABBITMQ_USERNAME: fanbook
       FANBOOK_RABBITMQ_PASSWORD: fanbook
+      FANBOOK_TRANSLATION_LISTENER_AUTO_STARTUP: "true"
       FANBOOK_STORAGE_ROOT: /app/runtime/storage
     ports:
       - "8080:8080"
