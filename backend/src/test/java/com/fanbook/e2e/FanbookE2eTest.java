@@ -11,6 +11,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fanbook.common.lock.BookTranslationLock;
 import com.fanbook.testsupport.MinimalEpubFactory;
+import com.fanbook.translation.application.TranslationChunkPublisher;
+import com.fanbook.translation.application.TranslationJobExecutor;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import org.junit.jupiter.api.Test;
@@ -21,6 +23,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
@@ -92,6 +95,15 @@ class FanbookE2eTest {
 
     @TestConfiguration
     static class LockConfig {
+        @Bean
+        @Primary
+        TranslationChunkPublisher executingTranslationChunkPublisher(
+                TranslationJobExecutor executor,
+                ThreadPoolTaskExecutor translationTaskExecutor
+        ) {
+            return message -> translationTaskExecutor.execute(() -> executor.runJob(message.jobId()));
+        }
+
         @Bean
         @Primary
         BookTranslationLock inMemoryBookTranslationLock() {
