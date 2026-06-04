@@ -39,11 +39,7 @@ public class TranslationJobController {
 
     @PostMapping("/api/books/{bookId}/translation-jobs/resume")
     public TranslationJobResponse resume(@PathVariable Long bookId) {
-        TranslationJobResponse response = translationResumeService.resume(bookId);
-        if ("QUEUED".equals(response.status())) {
-            translationJobService.submitAsync(response.jobId());
-        }
-        return response;
+        return translationResumeService.resume(bookId);
     }
 
     @PostMapping("/api/translation-jobs/{jobId}/cancel")

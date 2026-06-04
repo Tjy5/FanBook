@@ -45,6 +45,11 @@ public class TranslationChunkStateService {
         requireChunk(chunkId).markFailed(errorCode, errorMessage, OffsetDateTime.now());
     }
 
+    @Transactional(readOnly = true)
+    public int currentAttempt(Long chunkId) {
+        return requireChunk(chunkId).getAttemptCount();
+    }
+
     @Transactional
     void forceLeaseExpiredForTest(Long chunkId) {
         requireChunk(chunkId).forceLeaseExpired(OffsetDateTime.now().minusSeconds(1));

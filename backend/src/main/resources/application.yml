@@ -59,6 +59,7 @@ fanbook:
       routing-key: translation.chunk
       prefetch: 2
       concurrency: 4
+      listener-auto-startup: ${FANBOOK_TRANSLATION_LISTENER_AUTO_STARTUP:true}
     recovery:
       chunk-lease: 10m
       scan-delay: 60s

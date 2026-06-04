@@ -61,6 +61,7 @@ public class TranslationRabbitConfig {
         factory.setPrefetchCount(properties.prefetch());
         factory.setConcurrentConsumers(properties.concurrency());
         factory.setAcknowledgeMode(AcknowledgeMode.MANUAL);
+        factory.setAutoStartup(properties.listenerAutoStartup());
         return factory;
     }
 }

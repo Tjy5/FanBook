@@ -89,6 +89,13 @@ class TranslationResumeServiceTest {
     static class LockConfig {
         @Bean
         @Primary
+        TranslationChunkPublisher noopTranslationChunkPublisher() {
+            return message -> {
+            };
+        }
+
+        @Bean
+        @Primary
         BookTranslationLock inMemoryBookTranslationLock() {
             return new BookTranslationLock() {
                 private final Map<Long, Long> locks = new ConcurrentHashMap<>();

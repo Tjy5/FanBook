@@ -10,6 +10,7 @@ public record TranslationMessagingProperties(
         String deadLetterQueue,
         String routingKey,
         int prefetch,
-        int concurrency
+        int concurrency,
+        boolean listenerAutoStartup
 ) {
 }
