@@ -14,6 +14,7 @@ import com.fanbook.common.error.ErrorCode;
 import com.fanbook.common.error.FanbookException;
 import com.fanbook.translation.domain.TranslationChunkEntity;
 import com.fanbook.translation.infrastructure.TranslationChunkRepository;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -29,18 +30,21 @@ public class TranslationChunkWorker {
     private final SegmentRepository segmentRepository;
     private final ProviderFactory providerFactory;
     private final StructuredTranslationValidator validator;
+    private final TranslationCacheService cacheService;
     private final ObjectMapper objectMapper = JsonMapper.builder().build();
 
     public TranslationChunkWorker(
             TranslationChunkRepository chunkRepository,
             SegmentRepository segmentRepository,
             ProviderFactory providerFactory,
-            StructuredTranslationValidator validator
+            StructuredTranslationValidator validator,
+            TranslationCacheService cacheService
     ) {
         this.chunkRepository = chunkRepository;
         this.segmentRepository = segmentRepository;
         this.providerFactory = providerFactory;
         this.validator = validator;
+        this.cacheService = cacheService;
     }
 
     @Transactional
@@ -49,15 +53,26 @@ public class TranslationChunkWorker {
                 .orElseThrow(() -> notFound("Translation chunk '" + chunkId + "' was not found."));
         List<Long> segmentIds = parseSegmentIds(chunk.getSegmentIdsJson());
         List<SegmentEntity> segments = orderedSegments(segmentIds);
-        StructuredTranslationRequest request = buildRequest(chunk, segmentIds, segments);
-        var provider = providerFactory.getProvider(chunk.getJob().getProviderName());
-        var result = provider.translateChunk(request, chunk.getJob().getModelName());
-        validator.validate(segmentIds, result);
-
-        Map<Long, String> translatedById = result.items().stream()
-                .collect(Collectors.toMap(StructuredTranslationItem::segmentId, StructuredTranslationItem::translatedText));
+        List<SegmentEntity> missSegments = new ArrayList<>();
         for (SegmentEntity segment : segments) {
-            segment.markTranslated(translatedById.get(segment.getId()));
+            cacheService.lookup(segment, chunk.getJob(), "zh", "v1")
+                    .ifPresentOrElse(segment::markTranslated, () -> missSegments.add(segment));
+        }
+
+        if (!missSegments.isEmpty()) {
+            List<Long> missIds = missSegments.stream().map(SegmentEntity::getId).toList();
+            StructuredTranslationRequest request = buildRequest(chunk, missIds, missSegments);
+            var provider = providerFactory.getProvider(chunk.getJob().getProviderName());
+            var result = provider.translateChunk(request, chunk.getJob().getModelName());
+            validator.validate(missIds, result);
+
+            Map<Long, SegmentEntity> segmentById = missSegments.stream()
+                    .collect(Collectors.toMap(SegmentEntity::getId, Function.identity()));
+            for (StructuredTranslationItem item : result.items()) {
+                SegmentEntity segment = segmentById.get(item.segmentId());
+                segment.markTranslated(item.translatedText());
+                cacheService.store(segment, chunk.getJob(), "zh", "v1", item.translatedText());
+            }
         }
         segmentRepository.saveAll(segments);
     }
