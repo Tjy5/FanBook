@@ -60,6 +60,12 @@ public class TranslationChunkEntity {
     @Column(name = "started_at", columnDefinition = "DATETIME(6)")
     private OffsetDateTime startedAt;
 
+    @Column(name = "locked_until", columnDefinition = "DATETIME(6)")
+    private OffsetDateTime lockedUntil;
+
+    @Column(name = "worker_id", length = 64)
+    private String workerId;
+
     @Column(name = "finished_at", columnDefinition = "DATETIME(6)")
     private OffsetDateTime finishedAt;
 
@@ -138,6 +144,14 @@ public class TranslationChunkEntity {
         return startedAt;
     }
 
+    public OffsetDateTime getLockedUntil() {
+        return lockedUntil;
+    }
+
+    public String getWorkerId() {
+        return workerId;
+    }
+
     public OffsetDateTime getFinishedAt() {
         return finishedAt;
     }
@@ -159,6 +173,7 @@ public class TranslationChunkEntity {
     public void markPending() {
         this.status = TranslationChunkStatus.PENDING;
         this.startedAt = null;
+        clearLease();
         this.finishedAt = null;
         this.lastErrorCode = null;
         this.lastErrorMessage = null;
@@ -167,6 +182,7 @@ public class TranslationChunkEntity {
     public void markCompleted(OffsetDateTime finishedAt) {
         this.status = TranslationChunkStatus.COMPLETED;
         this.finishedAt = finishedAt;
+        clearLease();
         this.lastErrorCode = null;
         this.lastErrorMessage = null;
     }
@@ -176,5 +192,15 @@ public class TranslationChunkEntity {
         this.lastErrorCode = lastErrorCode;
         this.lastErrorMessage = lastErrorMessage;
         this.finishedAt = finishedAt;
+        clearLease();
+    }
+
+    public void forceLeaseExpired(OffsetDateTime lockedUntil) {
+        this.lockedUntil = lockedUntil;
+    }
+
+    private void clearLease() {
+        this.lockedUntil = null;
+        this.workerId = null;
     }
 }
