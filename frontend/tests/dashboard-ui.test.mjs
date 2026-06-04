@@ -27,6 +27,12 @@ const requiredHtmlFragments = [
   'id="download-zh"',
   'id="download-bilingual"',
   'id="download-consistency"',
+  'id="reader-panel"',
+  'id="reader-mode"',
+  'id="reader-chapter-select"',
+  'id="reader-segments"',
+  'id="segment-notes-panel"',
+  'id="notes-export"',
 ];
 
 for (const fragment of requiredHtmlFragments) {
@@ -99,6 +105,12 @@ const requiredJsFragments = [
   "/exports/zh",
   "/exports/bilingual",
   "/translated-title",
+  "readerInfo",
+  "loadReader",
+  "renderReaderSegments",
+  "createSegmentNote",
+  "/reader/info",
+  "/notes/export",
 ];
 
 for (const fragment of requiredJsFragments) {

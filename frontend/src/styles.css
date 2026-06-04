@@ -511,7 +511,8 @@ button {
   grid-template-columns: minmax(0, 1fr) 376px;
   grid-template-areas:
     "hero summary"
-    "chapters chapters";
+    "chapters chapters"
+    "reader notes";
   align-content: start;
   gap: 16px;
   padding: 16px;
@@ -520,7 +521,9 @@ button {
 .book-hero,
 .summary-panel,
 .chapters-panel,
-.rail-panel {
+.rail-panel,
+.reader-panel,
+.segment-notes-panel {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -761,6 +764,159 @@ button {
 .chapters-panel {
   grid-area: chapters;
   padding: 20px 22px;
+}
+
+.reader-panel {
+  grid-area: reader;
+  display: grid;
+  gap: 12px;
+  padding: 20px 22px;
+}
+
+.reader-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.reader-field {
+  min-width: 180px;
+  flex: 1 1 220px;
+}
+
+.reader-field select {
+  width: 100%;
+}
+
+.reader-segments {
+  display: grid;
+  gap: 12px;
+}
+
+.reader-segment {
+  display: grid;
+  gap: 12px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.reader-segment:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.reader-segment.active {
+  background: var(--surface-blue);
+  border-radius: var(--radius-sm);
+  padding-left: 12px;
+  padding-right: 12px;
+}
+
+.reader-segment-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.reader-segment-meta {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+}
+
+.reader-segment-meta strong {
+  font-size: 14px;
+}
+
+.reader-note-button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.reader-segment-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.reader-segment.single .reader-segment-body {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.reader-segment-column {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.reader-segment-kicker {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.reader-segment-column p {
+  margin: 0;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.segment-notes-panel {
+  grid-area: notes;
+  display: grid;
+  gap: 12px;
+  padding: 20px 22px;
+}
+
+.segment-notes-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.segment-notes-header p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.segment-notes-list {
+  display: grid;
+  gap: 10px;
+}
+
+.segment-note-card {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+}
+
+.segment-note-card header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.segment-note-card p {
+  margin: 0;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .chapter-table {
@@ -1155,7 +1311,9 @@ button {
     grid-template-areas:
       "hero"
       "summary"
-      "chapters";
+      "chapters"
+      "reader"
+      "notes";
   }
 
   .summary-body {
@@ -1273,5 +1431,15 @@ button {
 
   .book-status {
     left: 68px;
+  }
+
+  .reader-segment-head,
+  .segment-notes-header,
+  .reader-toolbar {
+    align-items: stretch;
+  }
+
+  .reader-segment-body {
+    grid-template-columns: 1fr;
   }
 }

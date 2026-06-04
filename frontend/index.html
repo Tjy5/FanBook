@@ -198,6 +198,37 @@
                 </table>
               </div>
             </section>
+
+            <section id="reader-panel" class="reader-panel" aria-label="在线阅读器">
+              <div class="panel-heading">
+                <h2>在线阅读</h2>
+              </div>
+              <div class="reader-toolbar">
+                <label class="field reader-field">
+                  <span class="visually-hidden">章节</span>
+                  <select id="reader-chapter-select" aria-label="选择章节"></select>
+                </label>
+                <label class="field reader-field">
+                  <span class="visually-hidden">阅读模式</span>
+                  <select id="reader-mode" aria-label="阅读模式">
+                    <option value="bilingual">双语</option>
+                    <option value="original">原文</option>
+                    <option value="translated">译文</option>
+                  </select>
+                </label>
+                <button id="notes-export" class="button button-secondary" type="button">导出笔记</button>
+              </div>
+              <div id="reader-segments" class="reader-segments">
+                <div class="empty-state">载入书籍后，这里会显示所选章节的段落。</div>
+              </div>
+            </section>
+
+            <aside id="segment-notes-panel" class="segment-notes-panel" aria-label="段落笔记">
+              <div class="panel-heading">
+                <h2>段落笔记</h2>
+              </div>
+              <div class="segment-notes-empty empty-state">选择一个段落后，笔记会显示在这里。</div>
+            </aside>
           </div>
         </section>
 

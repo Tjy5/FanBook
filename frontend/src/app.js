@@ -14,6 +14,13 @@ const state = {
   providerProfiles: [],
   defaultProviderProfileName: null,
   selectedProviderProfileName: window.localStorage.getItem(PROVIDER_PROFILE_STORAGE_KEY),
+  readerInfo: null,
+  readerChapters: [],
+  readerSegments: [],
+  selectedReaderChapterId: null,
+  selectedReaderSegmentId: null,
+  selectedReaderMode: "bilingual",
+  selectedReaderNotes: [],
 };
 
 const FALLBACK_PROVIDER_PROFILES = [
@@ -53,6 +60,12 @@ const elements = {
   bookMetadata: document.querySelector("#book-metadata"),
   exportList: document.querySelector("#export-list"),
   chaptersList: document.querySelector("#chapters-list"),
+  readerPanel: document.querySelector("#reader-panel"),
+  readerChapterSelect: document.querySelector("#reader-chapter-select"),
+  readerMode: document.querySelector("#reader-mode"),
+  readerSegments: document.querySelector("#reader-segments"),
+  segmentNotesPanel: document.querySelector("#segment-notes-panel"),
+  notesExportButton: document.querySelector("#notes-export"),
   messageLog: document.querySelector("#message-log"),
   detailPanel: document.querySelector("#book-detail-panel"),
   jobStatusPill: document.querySelector("#job-status-pill"),
@@ -82,6 +95,12 @@ const endpoint = {
   exportZh: (bookId) => `${API_BASE}/books/${bookId}/exports/zh`,
   exportBilingual: (bookId) => `${API_BASE}/books/${bookId}/exports/bilingual`,
   consistencyReport: (bookId) => `${API_BASE}/books/${bookId}/reports/consistency`,
+  readerInfo: (bookId) => `${API_BASE}/books/${bookId}/reader/info`,
+  readerChapters: (bookId) => `${API_BASE}/books/${bookId}/chapters`,
+  readerSegments: (bookId, chapterId, mode) =>
+    `${API_BASE}/books/${bookId}/chapters/${chapterId}/segments?mode=${encodeURIComponent(mode)}`,
+  segmentNotes: (segmentId) => `${API_BASE}/segments/${segmentId}/notes`,
+  notesExport: (bookId) => `${API_BASE}/books/${bookId}/notes/export`,
 };
 
 boot();
@@ -162,6 +181,9 @@ function bindEvents() {
   elements.downloadConsistencyButton.addEventListener("click", () => {
     void downloadArtifact("consistency_report");
   });
+  elements.notesExportButton.addEventListener("click", () => {
+    void downloadNotesExport();
+  });
   elements.bookList.addEventListener("click", (event) => {
     const row = event.target.closest("[data-book-id]");
     if (!row) {
@@ -184,6 +206,28 @@ function bindEvents() {
       return;
     }
     void updateTranslatedTitle();
+  });
+  elements.readerChapterSelect.addEventListener("change", () => {
+    state.selectedReaderChapterId = Number(elements.readerChapterSelect.value) || null;
+    void loadReaderSegments(state.currentBookId, state.selectedReaderChapterId);
+  });
+  elements.readerMode.addEventListener("change", () => {
+    state.selectedReaderMode = elements.readerMode.value || "bilingual";
+    if (state.currentBookId && state.selectedReaderChapterId) {
+      void loadReaderSegments(state.currentBookId, state.selectedReaderChapterId);
+    }
+  });
+  elements.readerSegments.addEventListener("click", (event) => {
+    const noteButton = event.target.closest("[data-create-segment-note]");
+    if (noteButton) {
+      void createSegmentNote(noteButton.dataset.createSegmentNote);
+      return;
+    }
+    const segment = event.target.closest("[data-reader-segment-id]");
+    if (segment) {
+      state.selectedReaderSegmentId = Number(segment.dataset.readerSegmentId) || null;
+      void loadSegmentNotes(state.selectedReaderSegmentId);
+    }
   });
 }
 
@@ -354,10 +398,17 @@ async function loadBook(bookId, options = {}) {
 
     state.currentBookId = Number(response.book?.id ?? normalizedBookId);
     state.currentBookDetail = response;
+    state.readerInfo = null;
+    state.readerChapters = [];
+    state.readerSegments = [];
+    state.selectedReaderChapterId = null;
+    state.selectedReaderSegmentId = null;
+    state.selectedReaderNotes = [];
 
     window.localStorage.setItem(STORAGE_KEY, String(state.currentBookId));
     updateUrlBookId(state.currentBookId);
     render();
+    await loadReader(state.currentBookId, { silent: options.silent });
 
     appendLog(
       `已载入《${displayBookTitle(response.book) || "未命名"}》 (#${state.currentBookId})。`
@@ -415,11 +466,15 @@ function render() {
   renderJob(job, detail?.chapters ?? []);
   renderExports(detail?.artifacts ?? []);
   renderChapters(detail?.chapters ?? [], job);
+  renderReaderChapterOptions(state.readerChapters);
+  renderReaderSegments();
+  renderSegmentNotesPanel();
   renderBookList();
   renderProviderProfileSummary();
   renderLog();
 
   elements.detailPanel.classList.toggle("is-empty", !book);
+  elements.readerPanel.classList.toggle("is-empty", !book);
 }
 
 function renderBookMetadata(book, job, options = {}) {
@@ -665,6 +720,202 @@ function renderChapters(chapters, job) {
   `;
 }
 
+async function loadReader(bookId, options = {}) {
+  const normalizedBookId = Number(bookId) || null;
+  if (!normalizedBookId) {
+    state.readerInfo = null;
+    state.readerChapters = [];
+    state.readerSegments = [];
+    state.selectedReaderChapterId = null;
+    state.selectedReaderSegmentId = null;
+    state.selectedReaderNotes = [];
+    renderReaderChapterOptions([]);
+    renderReaderSegments();
+    renderSegmentNotesPanel();
+    return;
+  }
+
+  try {
+    const [info, chaptersResponse] = await Promise.all([
+      fetchJson(endpoint.readerInfo(normalizedBookId), { method: "GET" }),
+      fetchJson(endpoint.readerChapters(normalizedBookId), { method: "GET" }),
+    ]);
+
+    state.readerInfo = info || null;
+    state.readerChapters = Array.isArray(chaptersResponse?.chapters) ? chaptersResponse.chapters : [];
+    state.selectedReaderChapterId = pickReaderChapterId(state.readerChapters, state.selectedReaderChapterId);
+    renderReaderChapterOptions(state.readerChapters);
+
+    if (state.selectedReaderChapterId) {
+      await loadReaderSegments(normalizedBookId, state.selectedReaderChapterId, { silent: options.silent });
+    } else {
+      state.readerSegments = [];
+      state.selectedReaderSegmentId = null;
+      state.selectedReaderNotes = [];
+      renderReaderSegments();
+      renderSegmentNotesPanel();
+    }
+  } catch (error) {
+    state.readerInfo = null;
+    state.readerChapters = [];
+    state.readerSegments = [];
+    state.selectedReaderChapterId = null;
+    state.selectedReaderSegmentId = null;
+    state.selectedReaderNotes = [];
+    renderReaderChapterOptions([]);
+    renderReaderSegments();
+    renderSegmentNotesPanel();
+    if (!options.silent) {
+      appendLog(normalizeError(error, "加载阅读器内容失败。"));
+    }
+  }
+}
+
+async function loadReaderSegments(bookId, chapterId, options = {}) {
+  const normalizedBookId = Number(bookId) || null;
+  const normalizedChapterId = Number(chapterId) || null;
+  if (!normalizedBookId || !normalizedChapterId) {
+    state.readerSegments = [];
+    state.selectedReaderSegmentId = null;
+    state.selectedReaderNotes = [];
+    renderReaderSegments();
+    renderSegmentNotesPanel();
+    return;
+  }
+
+  const mode = elements.readerMode?.value || state.selectedReaderMode || "bilingual";
+  state.selectedReaderMode = mode;
+
+  try {
+    const response = await fetchJson(
+      endpoint.readerSegments(normalizedBookId, normalizedChapterId, mode),
+      { method: "GET" }
+    );
+
+    state.readerSegments = Array.isArray(response?.segments) ? response.segments : [];
+    state.selectedReaderChapterId = Number(response?.chapterId ?? normalizedChapterId) || normalizedChapterId;
+    state.selectedReaderSegmentId = pickReaderSegmentId(state.readerSegments, state.selectedReaderSegmentId);
+    renderReaderSegments(response);
+
+    if (state.selectedReaderSegmentId) {
+      await loadSegmentNotes(state.selectedReaderSegmentId, { silent: true });
+    } else {
+      state.selectedReaderNotes = [];
+      renderSegmentNotesPanel();
+    }
+  } catch (error) {
+    state.readerSegments = [];
+    state.selectedReaderSegmentId = null;
+    state.selectedReaderNotes = [];
+    renderReaderSegments();
+    renderSegmentNotesPanel();
+    if (!options.silent) {
+      appendLog(normalizeError(error, "加载段落失败。"));
+    }
+  }
+}
+
+async function loadSegmentNotes(segmentId, options = {}) {
+  const normalizedSegmentId = Number(segmentId) || null;
+  if (!normalizedSegmentId) {
+    state.selectedReaderNotes = [];
+    renderSegmentNotesPanel();
+    return;
+  }
+
+  try {
+    const response = await fetchJson(endpoint.segmentNotes(normalizedSegmentId), {
+      method: "GET",
+    });
+    state.selectedReaderSegmentId = normalizedSegmentId;
+    state.selectedReaderNotes = Array.isArray(response) ? response : [];
+    renderSegmentNotesPanel();
+  } catch (error) {
+    state.selectedReaderNotes = [];
+    renderSegmentNotesPanel();
+    if (!options.silent) {
+      appendLog(normalizeError(error, "加载段落笔记失败。"));
+    }
+  }
+}
+
+async function createSegmentNote(segmentId) {
+  const normalizedSegmentId = Number(segmentId) || null;
+  if (!normalizedSegmentId) {
+    appendLog("请选择一个有效的段落后再创建笔记。");
+    return;
+  }
+
+  const content = window.prompt("笔记内容", "");
+  if (content === null) {
+    return;
+  }
+
+  const trimmed = content.trim();
+  if (!trimmed) {
+    appendLog("笔记内容不能为空。");
+    return;
+  }
+
+  try {
+    await fetchJson(endpoint.segmentNotes(normalizedSegmentId), {
+      method: "POST",
+      body: JSON.stringify({
+        content: trimmed,
+        highlightColor: "#fff5db",
+      }),
+    });
+    appendLog(`已为段落 #${normalizedSegmentId} 创建笔记。`);
+    await loadSegmentNotes(normalizedSegmentId, { silent: true });
+    if (state.currentBookId && state.selectedReaderChapterId) {
+      await loadReaderSegments(state.currentBookId, state.selectedReaderChapterId, { silent: true });
+    }
+  } catch (error) {
+    appendLog(normalizeError(error, "创建笔记失败。"));
+  }
+}
+
+async function downloadNotesExport() {
+  if (!state.currentBookId) {
+    appendLog("请先加载书籍，再导出笔记。");
+    return;
+  }
+
+  appendLog(`请求导出书籍 #${state.currentBookId} 的笔记。`);
+
+  try {
+    const response = await fetch(endpoint.notesExport(state.currentBookId), {
+      method: "GET",
+      headers: {
+        Accept: "text/markdown",
+      },
+    });
+
+    const contentType = response.headers.get("content-type") || "";
+    if (!response.ok) {
+      if (contentType.includes("application/json")) {
+        const payload = await response.json();
+        throw new Error(payload.message || payload.detail || "导出失败。");
+      }
+      throw new Error(`导出失败，状态码 ${response.status}。`);
+    }
+
+    const text = await response.text();
+    const blob = new Blob([text], { type: "text/markdown;charset=utf-8" });
+    const objectUrl = window.URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = `book-${state.currentBookId}-notes.md`;
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    window.URL.revokeObjectURL(objectUrl);
+    appendLog("笔记 Markdown 导出已开始。");
+  } catch (error) {
+    appendLog(normalizeError(error, "导出笔记失败。"));
+  }
+}
+
 function renderLog() {
   if (!state.activity.length) {
     elements.messageLog.innerHTML =
@@ -683,6 +934,195 @@ function renderLog() {
       `
     )
     .join("");
+}
+
+function renderReaderChapterOptions(chapters = state.readerChapters) {
+  const select = elements.readerChapterSelect;
+  if (!select) {
+    return;
+  }
+
+  const chapterList = Array.isArray(chapters) ? chapters : [];
+  if (!chapterList.length) {
+    select.disabled = true;
+    select.innerHTML = '<option value="">暂无章节</option>';
+    if (elements.notesExportButton) {
+      elements.notesExportButton.disabled = true;
+    }
+    return;
+  }
+
+  select.disabled = false;
+  if (elements.notesExportButton) {
+    elements.notesExportButton.disabled = false;
+  }
+  select.innerHTML = chapterList
+    .map((chapter) => {
+      const chapterId = pickChapterId(chapter);
+      const chapterOrder = Number(chapter?.chapterOrder ?? chapter?.order ?? 0) || 0;
+      const title = chapter?.title || `章节 ${chapterOrder || chapterId}`;
+      return `<option value="${escapeHtml(chapterId)}">#${escapeHtml(chapterOrder || chapterId)} · ${escapeHtml(title)}</option>`;
+    })
+    .join("");
+
+  const selectedChapterId = pickReaderChapterId(chapterList, state.selectedReaderChapterId);
+  state.selectedReaderChapterId = selectedChapterId;
+  if (selectedChapterId) {
+    select.value = String(selectedChapterId);
+  }
+}
+
+function renderReaderSegments(response = null) {
+  const container = elements.readerSegments;
+  if (!container) {
+    return;
+  }
+
+  const segments = Array.isArray(response?.segments) ? response.segments : state.readerSegments;
+  if (!segments.length) {
+    container.innerHTML = '<div class="empty-state">当前章节没有可显示的段落。</div>';
+    return;
+  }
+
+  const mode = elements.readerMode?.value || state.selectedReaderMode || "bilingual";
+  state.selectedReaderMode = mode;
+
+  container.innerHTML = segments
+    .map((segment) => renderReaderSegment(segment, mode))
+    .join("");
+}
+
+function renderReaderSegment(segment, mode) {
+  const segmentId = pickSegmentId(segment);
+  const order = Number(segment?.order ?? 0) || 0;
+  const translationStatus = String(segment?.translationStatus || segment?.translation_status || "").trim();
+  const noteCount = Number(segment?.noteCount ?? segment?.note_count ?? 0) || 0;
+  const activeClass = Number(segmentId) === Number(state.selectedReaderSegmentId) ? " active" : "";
+  const layoutClass = mode === "bilingual" ? " bilingual" : " single";
+  const sourceText = escapeHtml(segment?.sourceText || segment?.source_text || "暂无原文");
+  const translatedText = escapeHtml(segment?.translatedText || segment?.translated_text || "暂无译文");
+  const typeLabel = escapeHtml(segment?.type || "segment");
+  const noteLabel = noteCount > 0 ? `笔记 ${formatNumber(noteCount)}` : "添加笔记";
+  const sourceBlock = `
+    <div class="reader-segment-column reader-segment-source">
+      <span class="reader-segment-kicker">原文</span>
+      <p>${sourceText}</p>
+    </div>
+  `;
+  const translatedBlock = `
+    <div class="reader-segment-column reader-segment-translated">
+      <span class="reader-segment-kicker">译文</span>
+      <p>${translatedText}</p>
+    </div>
+  `;
+  const body = mode === "translated"
+    ? translatedBlock
+    : mode === "original"
+      ? sourceBlock
+      : `${sourceBlock}${translatedBlock}`;
+
+  return `
+    <article class="reader-segment${layoutClass}${activeClass}" data-reader-segment-id="${escapeHtml(segmentId)}" role="button" tabindex="0">
+      <header class="reader-segment-head">
+        <div class="reader-segment-meta">
+          <strong>段落 #${escapeHtml(order || segmentId)}</strong>
+          <span>${typeLabel}</span>
+          <span class="status-pill ${statusBadgeClass(translationStatus)}">${escapeHtml(translateStatus(translationStatus))}</span>
+        </div>
+        <button class="text-button reader-note-button" type="button" data-create-segment-note="${escapeHtml(segmentId)}">${escapeHtml(noteLabel)}</button>
+      </header>
+      <div class="reader-segment-body">
+        ${body}
+      </div>
+    </article>
+  `;
+}
+
+function renderSegmentNotesPanel() {
+  const panel = elements.segmentNotesPanel;
+  if (!panel) {
+    return;
+  }
+
+  const segment = getSelectedReaderSegment();
+  const notes = Array.isArray(state.selectedReaderNotes) ? state.selectedReaderNotes : [];
+  if (!segment) {
+    panel.innerHTML =
+      '<div class="segment-notes-empty empty-state">选择一个段落后，笔记会显示在这里。</div>';
+    return;
+  }
+
+  const sourcePreview = escapeHtml((segment.sourceText || segment.source_text || "").trim() || "暂无原文");
+  panel.innerHTML = `
+    <div class="segment-notes-header">
+      <div>
+        <strong>段落 #${escapeHtml(segment.order || segment.segmentOrder || segment.segment_id || segment.segmentId || 0)}</strong>
+        <p>${sourcePreview}</p>
+      </div>
+      <button class="text-button" type="button" data-create-segment-note="${escapeHtml(pickSegmentId(segment))}">新建笔记</button>
+    </div>
+    <div class="segment-notes-list">
+      ${
+        notes.length
+          ? notes
+            .map(
+              (note) => `
+                <article class="segment-note-card">
+                  <header>
+                    <strong>${escapeHtml(note.createdBy || note.created_by || "local")}</strong>
+                    <time>${escapeHtml(formatDateTime(note.createdAt || note.created_at))}</time>
+                  </header>
+                  <p>${escapeHtml(note.content || note.note_content || "")}</p>
+                </article>
+              `
+            )
+            .join("")
+          : '<div class="empty-state">这个段落还没有笔记。</div>'
+      }
+    </div>
+  `;
+}
+
+function pickReaderChapterId(chapters, preferredChapterId) {
+  if (!Array.isArray(chapters) || !chapters.length) {
+    return null;
+  }
+
+  const preferred = Number(preferredChapterId) || null;
+  if (preferred && chapters.some((chapter) => Number(pickChapterId(chapter)) === preferred)) {
+    return preferred;
+  }
+
+  return pickChapterId(chapters[0]);
+}
+
+function pickReaderSegmentId(segments, preferredSegmentId) {
+  if (!Array.isArray(segments) || !segments.length) {
+    return null;
+  }
+
+  const preferred = Number(preferredSegmentId) || null;
+  if (preferred && segments.some((segment) => Number(pickSegmentId(segment)) === preferred)) {
+    return preferred;
+  }
+
+  return pickSegmentId(segments[0]);
+}
+
+function pickChapterId(chapter) {
+  return Number(chapter?.chapterId ?? chapter?.id ?? 0) || null;
+}
+
+function pickSegmentId(segment) {
+  return Number(segment?.segmentId ?? segment?.id ?? 0) || null;
+}
+
+function getSelectedReaderSegment() {
+  const segmentId = Number(state.selectedReaderSegmentId) || null;
+  if (!segmentId) {
+    return null;
+  }
+  return state.readerSegments.find((segment) => Number(pickSegmentId(segment)) === segmentId) || null;
 }
 
 async function loadProviderProfiles() {
@@ -1113,15 +1553,19 @@ function sourceLanguageLabel(value) {
 
 function statusBadgeClass(status) {
   switch ((status || "").toLowerCase()) {
+    case "translated":
     case "completed":
     case "ready":
       return "status-success";
+    case "translating":
     case "running":
+    case "pending":
+    case "queued":
       return "status-running";
     case "failed":
     case "error":
       return "status-failed";
-    case "pending":
+    case "skipped":
       return "status-accent";
     default:
       return "status-neutral";
@@ -1130,19 +1574,23 @@ function statusBadgeClass(status) {
 
 function translateStatus(status) {
   switch ((status || "").toLowerCase()) {
+    case "translated":
     case "completed":
     case "ready":
-      return "已完成";
+      return "已翻译";
+    case "translating":
     case "running":
-      return "进行中";
+      return "翻译中";
     case "failed":
     case "error":
       return "失败";
     case "pending":
     case "queued":
-      return "等待中";
+      return "待翻译";
     case "canceled":
       return "已取消";
+    case "skipped":
+      return "已跳过";
     case "idle":
       return "空闲";
     case "unknown":
