@@ -3,6 +3,7 @@
 .codex/
 .claude/
 .antigravity/
+.worktrees/
 .venv/
 .pytest-run-*/
 pytest-cache-files-*/
