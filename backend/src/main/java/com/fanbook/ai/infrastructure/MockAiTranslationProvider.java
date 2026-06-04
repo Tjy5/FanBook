@@ -18,10 +18,11 @@ public class MockAiTranslationProvider implements AiTranslationProvider {
     }
 
     @Override
-    public StructuredTranslationResult translateChunk(StructuredTranslationRequest request) {
+    public StructuredTranslationResult translateChunk(StructuredTranslationRequest request, String modelName) {
         List<StructuredTranslationItem> translated = request.items().stream()
                 .map(item -> new StructuredTranslationItem(item.segmentId(), "[zh] " + item.sourceText()))
                 .toList();
-        return new StructuredTranslationResult(translated, name(), "mock-translator");
+        String resolvedModelName = modelName == null || modelName.isBlank() ? "mock-translator" : modelName;
+        return new StructuredTranslationResult(translated, name(), resolvedModelName);
     }
 }

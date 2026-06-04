@@ -55,12 +55,13 @@ public class OpenAiCompatibleProvider implements AiTranslationProvider {
     }
 
     @Override
-    public StructuredTranslationResult translateChunk(StructuredTranslationRequest request) {
+    public StructuredTranslationResult translateChunk(StructuredTranslationRequest request, String modelName) {
         requireApiKey();
         acquirePermit();
         try {
+            String resolvedModelName = modelName == null || modelName.isBlank() ? properties.model() : modelName;
             Map<String, Object> payload = Map.of(
-                    "model", properties.model(),
+                    "model", resolvedModelName,
                     "instructions", STRUCTURED_OUTPUT_INSTRUCTIONS,
                     "input", objectMapper.writeValueAsString(request)
             );
@@ -72,7 +73,7 @@ public class OpenAiCompatibleProvider implements AiTranslationProvider {
                     .retrieve()
                     .body(String.class);
             StructuredTranslationResult parsed = objectMapper.readValue(outputText(body), StructuredTranslationResult.class);
-            return new StructuredTranslationResult(parsed.items(), name(), properties.model());
+            return new StructuredTranslationResult(parsed.items(), name(), resolvedModelName);
         } catch (FanbookException exception) {
             throw exception;
         } catch (Exception exception) {

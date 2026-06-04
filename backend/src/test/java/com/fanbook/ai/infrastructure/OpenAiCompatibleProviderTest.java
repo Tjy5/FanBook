@@ -2,6 +2,8 @@ package com.fanbook.ai.infrastructure;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.hamcrest.Matchers.containsString;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.content;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
@@ -54,6 +56,41 @@ class OpenAiCompatibleProviderTest {
         assertThat(result.modelName()).isEqualTo("gpt-test");
         assertThat(result.items()).hasSize(1);
         assertThat(result.items().getFirst().translatedText()).isEqualTo("你好");
+        server.verify();
+    }
+
+    @Test
+    void usesRequestedModelWhenProvided() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo("https://fake.example/v1/responses"))
+                .andExpect(content().string(containsString("\"model\":\"job-model\"")))
+                .andRespond(withSuccess("""
+                        {
+                          "output_text": "{\\"items\\":[{\\"segmentId\\":1,\\"translatedText\\":\\"你好\\"}]}"
+                        }
+                        """, MediaType.APPLICATION_JSON));
+        OpenAiCompatibleProvider provider = new OpenAiCompatibleProvider(
+                builder,
+                JsonMapper.builder().build(),
+                new OpenAiCompatibleProperties(
+                        "https://fake.example/v1",
+                        "test-key",
+                        "gpt-test",
+                        Duration.ofSeconds(30),
+                        2
+                )
+        );
+
+        var result = provider.translateChunk(new StructuredTranslationRequest(
+                "en",
+                "zh",
+                "Demo Book",
+                "Chapter One",
+                List.of(new StructuredTranslationSourceItem(1L, "Hello"))
+        ), "job-model");
+
+        assertThat(result.modelName()).isEqualTo("job-model");
         server.verify();
     }
 
