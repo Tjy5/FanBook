@@ -12,6 +12,7 @@ import com.fanbook.common.error.FanbookException;
 import com.fanbook.reader.api.ChapterListResponse;
 import com.fanbook.reader.api.ChapterSegmentResponse;
 import com.fanbook.reader.api.ReaderInfoResponse;
+import com.fanbook.reader.infrastructure.SegmentNoteRepository;
 import com.fanbook.translation.api.TranslationJobResponse;
 import com.fanbook.translation.domain.TranslationJobEntity;
 import com.fanbook.translation.infrastructure.TranslationJobRepository;
@@ -27,17 +28,20 @@ public class ReaderApplicationService {
     private final ChapterRepository chapterRepository;
     private final SegmentRepository segmentRepository;
     private final TranslationJobRepository jobRepository;
+    private final SegmentNoteRepository noteRepository;
 
     public ReaderApplicationService(
             BookRepository bookRepository,
             ChapterRepository chapterRepository,
             SegmentRepository segmentRepository,
-            TranslationJobRepository jobRepository
+            TranslationJobRepository jobRepository,
+            SegmentNoteRepository noteRepository
     ) {
         this.bookRepository = bookRepository;
         this.chapterRepository = chapterRepository;
         this.segmentRepository = segmentRepository;
         this.jobRepository = jobRepository;
+        this.noteRepository = noteRepository;
     }
 
     @Transactional(readOnly = true)
@@ -93,7 +97,7 @@ public class ReaderApplicationService {
                 segment.getSourceText(),
                 segment.getTranslatedText(),
                 segment.getStatus().name(),
-                0
+                noteRepository.countBySegmentId(segment.getId())
         );
     }
 
