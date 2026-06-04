@@ -10,6 +10,7 @@ import com.fanbook.common.error.ErrorCode;
 import com.fanbook.common.error.FanbookException;
 import com.fanbook.testsupport.MinimalEpubFactory;
 import com.fanbook.translation.api.StartTranslationRequest;
+import com.fanbook.translation.domain.TranslationChunkStatus;
 import com.fanbook.translation.domain.TranslationJobStatus;
 import com.fanbook.translation.infrastructure.ChunkDeliveryAction;
 import com.fanbook.translation.infrastructure.TranslationChunkConsumer;
@@ -55,6 +56,12 @@ class TranslationMessagingAcceptanceTest {
     TranslationChunkConsumer consumer;
 
     @Autowired
+    TranslationChunkStateService stateService;
+
+    @Autowired
+    TranslationJobAggregator aggregator;
+
+    @Autowired
     CountingMockProvider providerSpy;
 
     @Autowired
@@ -87,6 +94,33 @@ class TranslationMessagingAcceptanceTest {
 
         assertThat(jobRepository.findById(fixture.jobId()).orElseThrow().getStatus())
                 .isEqualTo(TranslationJobStatus.FAILED);
+    }
+
+    @Test
+    void canceledJobMessageIsAckedWithoutTranslation() {
+        Fixture fixture = createJobWithOneChunk("counting");
+        translationJobService.cancel(fixture.jobId());
+
+        assertThat(consumer.handleForTest(ChunkMessage.start(fixture.jobId(), fixture.chunkId())))
+                .isEqualTo(ChunkDeliveryAction.ACK);
+
+        assertThat(providerSpy.calls()).isZero();
+        assertThat(chunkRepository.findById(fixture.chunkId()).orElseThrow().getStatus())
+                .isEqualTo(TranslationChunkStatus.PENDING);
+        assertThat(jobRepository.findById(fixture.jobId()).orElseThrow().getStatus())
+                .isEqualTo(TranslationJobStatus.CANCELED);
+    }
+
+    @Test
+    void aggregationDoesNotOverwriteCanceledJob() {
+        Fixture fixture = createJobWithOneChunk("counting");
+        translationJobService.cancel(fixture.jobId());
+        stateService.markCompleted(fixture.chunkId());
+
+        aggregator.aggregate(fixture.jobId());
+
+        assertThat(jobRepository.findById(fixture.jobId()).orElseThrow().getStatus())
+                .isEqualTo(TranslationJobStatus.CANCELED);
     }
 
     private Fixture createJobWithOneChunk(String providerName) {

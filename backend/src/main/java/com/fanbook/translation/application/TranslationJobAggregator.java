@@ -3,6 +3,7 @@ package com.fanbook.translation.application;
 import com.fanbook.common.error.ErrorCode;
 import com.fanbook.translation.domain.TranslationChunkStatus;
 import com.fanbook.translation.domain.TranslationJobEntity;
+import com.fanbook.translation.domain.TranslationJobStatus;
 import com.fanbook.translation.infrastructure.ActiveTranslationSessionRepository;
 import com.fanbook.translation.infrastructure.TranslationChunkRepository;
 import com.fanbook.translation.infrastructure.TranslationJobRepository;
@@ -34,6 +35,9 @@ public class TranslationJobAggregator {
     @Transactional
     public void aggregate(Long jobId) {
         TranslationJobEntity job = jobRepository.findById(jobId).orElseThrow();
+        if (job.getStatus() == TranslationJobStatus.CANCELED) {
+            return;
+        }
         var chunks = chunkRepository.findByJobIdOrderByChunkOrderAsc(jobId);
         if (chunks.isEmpty()) {
             return;

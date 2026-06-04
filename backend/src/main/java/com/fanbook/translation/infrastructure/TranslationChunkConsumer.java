@@ -6,6 +6,7 @@ import com.fanbook.translation.application.TranslationChunkPublisher;
 import com.fanbook.translation.application.TranslationChunkStateService;
 import com.fanbook.translation.application.TranslationChunkWorker;
 import com.fanbook.translation.application.TranslationJobAggregator;
+import com.fanbook.translation.domain.TranslationJobStatus;
 import com.rabbitmq.client.Channel;
 import java.io.IOException;
 import java.time.OffsetDateTime;
@@ -32,6 +33,7 @@ public class TranslationChunkConsumer {
     private final TranslationChunkWorker worker;
     private final TranslationJobAggregator aggregator;
     private final TranslationChunkPublisher chunkPublisher;
+    private final TranslationJobRepository jobRepository;
     private final TransactionTemplate transactionTemplate;
     private final TransactionTemplate afterCommitTransactionTemplate;
     private final int maxAttempts;
@@ -41,6 +43,7 @@ public class TranslationChunkConsumer {
             TranslationChunkWorker worker,
             TranslationJobAggregator aggregator,
             TranslationChunkPublisher chunkPublisher,
+            TranslationJobRepository jobRepository,
             PlatformTransactionManager transactionManager,
             @Value("${fanbook.translation.max-attempts-per-chunk:3}") int maxAttempts
     ) {
@@ -48,6 +51,7 @@ public class TranslationChunkConsumer {
         this.worker = worker;
         this.aggregator = aggregator;
         this.chunkPublisher = chunkPublisher;
+        this.jobRepository = jobRepository;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.afterCommitTransactionTemplate = new TransactionTemplate(transactionManager);
         this.afterCommitTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
@@ -72,6 +76,9 @@ public class TranslationChunkConsumer {
     }
 
     public ChunkDeliveryAction handleForTest(ChunkMessage message) {
+        if (isCanceled(message.jobId())) {
+            return ChunkDeliveryAction.ACK;
+        }
         if (!stateService.tryAcquire(message.chunkId(), workerId())) {
             return ChunkDeliveryAction.ACK;
         }
@@ -87,6 +94,12 @@ public class TranslationChunkConsumer {
             log.warn("Transient chunk processing failure for chunk {}", message.chunkId(), exception);
             return ChunkDeliveryAction.NACK_REQUEUE;
         }
+    }
+
+    private boolean isCanceled(Long jobId) {
+        return jobRepository.findById(jobId)
+                .map(job -> job.getStatus() == TranslationJobStatus.CANCELED)
+                .orElse(false);
     }
 
     private void handleBusinessFailure(ChunkMessage message, FanbookException exception) {
