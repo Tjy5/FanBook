@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fanbook.common.lock.BookTranslationLock;
 import com.fanbook.testsupport.MinimalEpubFactory;
+import com.fanbook.translation.application.TranslationChunkPublisher;
 import com.fanbook.translation.infrastructure.TranslationChunkRepository;
 import java.util.Map;
 import java.util.Set;
@@ -75,6 +76,13 @@ class TranslationJobControllerIntegrationTest {
 
     @TestConfiguration
     static class LockConfig {
+        @Bean
+        @Primary
+        TranslationChunkPublisher noopTranslationChunkPublisher() {
+            return message -> {
+            };
+        }
+
         @Bean
         @Primary
         BookTranslationLock inMemoryBookTranslationLock() {
