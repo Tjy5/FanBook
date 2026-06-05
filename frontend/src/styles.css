@@ -854,7 +854,13 @@ button {
 
 .translate-content {
   display: grid;
-  gap: 20px;
+  grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr);
+  grid-template-rows: auto auto auto;
+  gap: 1.5rem;
+  grid-template-areas:
+    "hero hero"
+    "summary exports"
+    "chapters log";
 }
 
 .page-empty-state {
@@ -886,11 +892,30 @@ button {
 
 .book-hero,
 .summary-panel,
-.chapters-panel {
+.exports-panel,
+.chapters-panel,
+.log-workspace-panel {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   box-shadow: var(--shadow-soft);
+}
+
+.exports-panel {
+  grid-area: exports;
+  padding: 20px 22px;
+}
+
+.log-workspace-panel {
+  grid-area: log;
+  padding: 20px 22px;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.log-workspace-panel .message-log {
+  max-height: 400px;
+  overflow-y: auto;
 }
 
 .book-hero {
@@ -1371,6 +1396,19 @@ button {
 }
 
 /* ========== RESPONSIVE ========== */
+@media (max-width: 1200px) {
+  .translate-content {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto;
+    grid-template-areas:
+      "hero"
+      "summary"
+      "exports"
+      "chapters"
+      "log";
+  }
+}
+
 @media (max-width: 1180px) {
   .app-shell {
     grid-template-rows: auto minmax(0, 1fr);
