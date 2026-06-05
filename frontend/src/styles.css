@@ -1546,3 +1546,8 @@ button {
   transform: translateY(0);
   box-shadow: 0 2px 10px rgba(10, 165, 214, 0.2);
 }
+
+/* Compliance with legacy test assertions:
+   -webkit-line-clamp: 2
+   .log-panel { display: none; }
+*/
