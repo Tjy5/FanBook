@@ -46,6 +46,7 @@ function createElements() {
     "downloadZhButton",
     "downloadBilingualButton",
     "downloadConsistencyButton",
+    "translateEmptyState",
   ];
   return Object.fromEntries(names.map((name) => [name, createFakeElement()]));
 }
@@ -178,3 +179,42 @@ assert.match(
   /id="book-title-heading"/,
   "Expected rendered metadata to keep the heading id referenced by the book hero"
 );
+
+// Test empty state rendering
+const emptyStateWithBooksElements = {
+  ...createElements(),
+  translateEmptyState: createFakeElement(),
+};
+const emptyStateWithBooks = {
+  activity: [],
+  books: [
+    { id: 1, title: "Book A", status: "completed", created_at: "2026-06-05T00:00:00Z", updated_at: "2026-06-05T00:00:00Z" },
+    { id: 2, title: "Book B", status: "running", created_at: "2026-06-05T00:00:00Z", updated_at: "2026-06-05T00:00:00Z" },
+  ],
+  currentBookDetail: null,
+  providerProfiles: [],
+  selectedProviderProfileName: null,
+};
+
+renderTranslate({
+  elements: emptyStateWithBooksElements,
+  state: emptyStateWithBooks,
+  providerActions: createProviderActions(emptyStateWithBooks),
+});
+
+assert.match(
+  emptyStateWithBooksElements.translateEmptyState.innerHTML,
+  /开始翻译你的第一本书/,
+  "Expected empty state title to guide users to start translation"
+);
+assert.match(
+  emptyStateWithBooksElements.translateEmptyState.innerHTML,
+  /Book A/,
+  "Expected empty state to render recent books quick links"
+);
+assert.match(
+  emptyStateWithBooksElements.translateEmptyState.innerHTML,
+  /data-load-recent-book-id="1"/,
+  "Expected quick links to contain data-load-recent-book-id attribute"
+);
+

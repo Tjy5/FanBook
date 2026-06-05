@@ -110,6 +110,18 @@ export function bindEvents({ elements, state, actions }) {
   elements.segmentNotesPanel.addEventListener("click", (event) => {
     actions.onReaderSegmentsClick(event);
   });
+  if (elements.translateEmptyState) {
+    elements.translateEmptyState.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-load-recent-book-id]");
+      if (!button) {
+        return;
+      }
+      const bookId = button.dataset.loadRecentBookId;
+      if (bookId) {
+        void actions.loadBook(bookId, { silent: false });
+      }
+    });
+  }
 }
 
 function isInteractiveControl(target) {
