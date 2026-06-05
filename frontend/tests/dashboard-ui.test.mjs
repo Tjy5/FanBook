@@ -1,23 +1,77 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import assert from "node:assert/strict";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const frontendRoot = join(__dirname, "..");
-const html = readFileSync(join(frontendRoot, "index.html"), "utf8");
-const css = readFileSync(join(frontendRoot, "src", "styles.css"), "utf8");
-const js = readFileSync(join(frontendRoot, "src", "app.js"), "utf8");
+const readFrontendFile = (...segments) => readFileSync(join(frontendRoot, ...segments), "utf8");
+const html = readFrontendFile("index.html");
+const css = readFrontendFile("src", "styles.css");
+
+const moduleFiles = [
+  ["src", "app.js"],
+  ["src", "state.js"],
+  ["src", "api", "index.js"],
+  ["src", "router.js"],
+  ["src", "dom.js"],
+  ["src", "events.js"],
+  ["src", "pages", "home.js"],
+  ["src", "pages", "translate.js"],
+  ["src", "pages", "reader.js"],
+  ["src", "components", "shared.js"],
+  ["src", "utils", "html.js"],
+  ["src", "utils", "format.js"],
+  ["src", "utils", "status.js"],
+  ["src", "utils", "book.js"],
+];
+const existingModuleFiles = moduleFiles.filter((segments) => existsSync(join(frontendRoot, ...segments)));
+const js = existingModuleFiles.map((segments) => readFrontendFile(...segments)).join("\n");
+
+assert.ok(html.includes('<script type="module"'), "Expected index.html to keep a single ES module entry");
+
+const requiredModulePaths = [
+  ["src", "state.js"],
+  ["src", "api", "index.js"],
+  ["src", "router.js"],
+  ["src", "dom.js"],
+  ["src", "events.js"],
+  ["src", "pages", "home.js"],
+  ["src", "pages", "translate.js"],
+  ["src", "pages", "reader.js"],
+  ["src", "components", "shared.js"],
+  ["src", "utils", "html.js"],
+  ["src", "utils", "format.js"],
+  ["src", "utils", "status.js"],
+  ["src", "utils", "book.js"],
+];
+
+for (const segments of requiredModulePaths) {
+  const path = join(frontendRoot, ...segments);
+  assert.ok(existsSync(path), `Expected module file ${segments.join("/")}`);
+}
 
 const requiredHtmlFragments = [
   'class="topbar"',
-  'class="library-sidebar"',
-  'id="book-list"',
-  'class="workspace-main"',
-  'class="book-hero"',
+  'class="page-nav"',
+  'href="#/home"',
+  'href="#/translate"',
+  'href="#/read"',
+  'data-route-link="home"',
+  'data-route-link="translate"',
+  'data-route-link="read"',
+  'data-page="home"',
+  'data-page="translate"',
+  'data-page="read"',
+  'id="home-book-list"',
+  'id="home-running-count"',
+  'id="home-selected-book"',
+  'id="translate-empty-state"',
+  'id="read-empty-state"',
+  'id="reader-empty-action"',
+  'class="book-hero',
   'id="book-cover"',
   'id="overall-progress-ring"',
-  'class="actions-rail"',
   'id="translation-provider-profile"',
   'id="chapters-list"',
   'id="message-log"',
@@ -40,19 +94,41 @@ for (const fragment of requiredHtmlFragments) {
 }
 
 const requiredCssFragments = [
-  ".app-frame",
   ".topbar",
-  ".library-sidebar",
-  ".workspace-main",
-  ".actions-rail",
+  ".page-nav",
+  ".page-view",
+  ".page-view.active",
+  ".home-grid",
+  ".translate-grid",
+  ".reader-layout",
   ".progress-ring",
   ".chapter-table",
-  "@media (max-width: 1180px)",
+  "@media (max-width: 1040px)",
   "@media (max-width: 760px)",
 ];
 
 for (const fragment of requiredCssFragments) {
   assert.ok(css.includes(fragment), `Expected styles.css to include ${fragment}`);
+}
+
+assert.ok(
+  css.includes("width: 24em;") && css.includes("max-width: 100%;"),
+  "Expected empty-state body text to stay within mobile viewports"
+);
+
+const requiredCssSections = [
+  "/* ========== TOKENS ========== */",
+  "/* ========== BASE ========== */",
+  "/* ========== LAYOUT ========== */",
+  "/* ========== COMPONENTS ========== */",
+  "/* ========== PAGE: HOME ========== */",
+  "/* ========== PAGE: TRANSLATE ========== */",
+  "/* ========== PAGE: READER ========== */",
+  "/* ========== RESPONSIVE ========== */",
+];
+
+for (const fragment of requiredCssSections) {
+  assert.ok(css.includes(fragment), `Expected styles.css to include section ${fragment}`);
 }
 
 assert.ok(
@@ -65,8 +141,6 @@ assert.ok(
 );
 
 const requiredFluidLayoutFragments = [
-  "grid-template-columns: minmax(280px, 320px) minmax(0, 1fr) minmax(300px, 340px)",
-  "grid-template-rows: auto auto auto minmax(0, 1fr)",
   "grid-template-columns: repeat(2, minmax(0, 1fr))",
   "-webkit-line-clamp: 2",
   ".log-panel",
@@ -84,6 +158,15 @@ assert.ok(
 );
 
 const requiredJsFragments = [
+  "activePage",
+  "normalizeRoute",
+  "applyRoute",
+  "navigateTo",
+  "syncRouteHash",
+  "renderRoute",
+  "window.location.hash",
+  "const routeHash = `#/${route}`",
+  "url.searchParams.set(\"bookId\"",
   "overallProgressRing",
   "totalSegments",
   "translatedSegments",
@@ -117,6 +200,22 @@ for (const fragment of requiredJsFragments) {
   assert.ok(js.includes(fragment), `Expected app.js to include ${fragment}`);
 }
 
+const requiredInteractionFragments = [
+  'elements.segmentNotesPanel.addEventListener("click"',
+  "isInteractiveControl",
+  "event.preventDefault()",
+  'class="reader-segment-main"',
+];
+
+for (const fragment of requiredInteractionFragments) {
+  assert.ok(js.includes(fragment), `Expected frontend interactions to include ${fragment}`);
+}
+
+assert.ok(
+  !js.includes('<article class="reader-segment${layoutClass}${activeClass}" data-reader-segment-id='),
+  "Expected reader segment selection target not to wrap the note button"
+);
+
 const deprecatedJsFragments = [
   "DEMO_DETAIL",
   "Book Three: The Prophet",
@@ -132,4 +231,25 @@ const deprecatedJsFragments = [
 
 for (const fragment of deprecatedJsFragments) {
   assert.ok(!js.includes(fragment), `Expected app.js not to include deprecated fragment ${fragment}`);
+}
+
+const deprecatedHtmlFragments = [
+  'class="actions-rail"',
+  'class="workspace-main"',
+  'class="workspace-grid"',
+];
+
+for (const fragment of deprecatedHtmlFragments) {
+  assert.ok(!html.includes(fragment), `Expected index.html not to include deprecated fragment ${fragment}`);
+}
+
+const deprecatedCssFragments = [
+  ".actions-rail",
+  ".workspace-main",
+  ".workspace-grid",
+  "grid-template-columns: minmax(280px, 320px) minmax(0, 1fr) minmax(300px, 340px)",
+];
+
+for (const fragment of deprecatedCssFragments) {
+  assert.ok(!css.includes(fragment), `Expected styles.css not to include deprecated fragment ${fragment}`);
 }

@@ -1,114 +1,52 @@
+import { escapeHtml } from "./utils/html.js";
+import { clampPercentage, formatBytes, formatDateTime, formatDuration, formatNumber } from "./utils/format.js";
+import { bookStatusClass, statusBadgeClass, translateStatus } from "./utils/status.js";
+import {
+  bookCoverInitials,
+  displayBookTitle,
+  getBookCoverStyle,
+  normalizedTranslatedTitle,
+  renderTranslatedTitle,
+  sourceLanguageLabel,
+  translateArtifactKind,
+} from "./utils/book.js";
+import { createEndpoint, extractFilename, fetchJson, normalizeError } from "./api/index.js";
+import { createElements } from "./dom.js";
+import { normalizeRoute, renderRoute, syncRouteHash } from "./router.js";
+import { createInitialState, FALLBACK_PROVIDER_PROFILES, POLL_INTERVAL_MS, PROVIDER_PROFILE_STORAGE_KEY, STORAGE_KEY } from "./state.js";
+import { renderBookList, renderHome } from "./pages/home.js";
+import { renderLog, renderTranslate } from "./pages/translate.js";
+import {
+  pickChapterId,
+  pickReaderChapterId,
+  pickReaderSegmentId,
+  pickSegmentId,
+  renderReader,
+  renderReaderChapterOptions,
+  renderReaderSegments,
+  renderSegmentNotesPanel,
+  getSelectedReaderSegment,
+} from "./pages/reader.js";
+import { bindEvents } from "./events.js";
+
+// ==========================================
+// CONSTANTS AND SINGLETONS
+// ==========================================
 const API_BASE = window.FANBOOK_API_BASE || "/api";
-const STORAGE_KEY = "fanbook.currentBookId";
-const PROVIDER_PROFILE_STORAGE_KEY = "fanbook.translationProviderProfile";
-const POLL_INTERVAL_MS = 3000;
+const state = createInitialState(window.localStorage);
+const elements = createElements(document);
+const endpoint = createEndpoint(API_BASE);
 
-const state = {
-  currentBookId: null,
-  currentBookDetail: null,
-  books: [],
-  statusCounts: null,
-  activeBookFilter: "all",
-  pollTimer: null,
-  activity: [],
-  providerProfiles: [],
-  defaultProviderProfileName: null,
-  selectedProviderProfileName: window.localStorage.getItem(PROVIDER_PROFILE_STORAGE_KEY),
-  readerInfo: null,
-  readerChapters: [],
-  readerSegments: [],
-  selectedReaderChapterId: null,
-  selectedReaderSegmentId: null,
-  selectedReaderMode: "bilingual",
-  selectedReaderNotes: [],
-};
-
-const FALLBACK_PROVIDER_PROFILES = [
-  {
-    profile_name: "默认配置",
-    provider_name: "OpenAI",
-    default_model_name: "gpt-4o",
-    configured: true,
-    max_requests_per_minute: 60,
-    global_max_concurrency: 4,
-    per_chapter_concurrency: 1,
-    is_default: true,
-  },
-];
-
-const elements = {
-  apiBaseLabel: document.querySelector("#api-base-label"),
-  apiConnectionLabel: document.querySelector("#api-connection-label"),
-  providerStatusLabel: document.querySelector("#provider-status-label"),
-  currentBookLabel: document.querySelector("#current-book-label"),
-  pollingLabel: document.querySelector("#polling-label"),
-  uploadForm: document.querySelector("#upload-form"),
-  lookupForm: document.querySelector("#lookup-form"),
-  translationForm: document.querySelector("#translation-form"),
-  refreshButton: document.querySelector("#refresh-book"),
-  useLatestButton: document.querySelector("#use-latest-book"),
-  stopPollingButton: document.querySelector("#stop-polling-button"),
-  resumeButton: document.querySelector("#resume-button"),
-  downloadZhButton: document.querySelector("#download-zh"),
-  downloadBilingualButton: document.querySelector("#download-bilingual"),
-  downloadConsistencyButton: document.querySelector("#download-consistency"),
-  uploadButton: document.querySelector("#upload-button"),
-  translateButton: document.querySelector("#translate-button"),
-  translationProviderProfileSelect: document.querySelector("#translation-provider-profile"),
-  translationProviderSummary: document.querySelector("#translation-provider-summary"),
-  bookIdInput: document.querySelector("#book-id-input"),
-  bookMetadata: document.querySelector("#book-metadata"),
-  exportList: document.querySelector("#export-list"),
-  chaptersList: document.querySelector("#chapters-list"),
-  readerPanel: document.querySelector("#reader-panel"),
-  readerChapterSelect: document.querySelector("#reader-chapter-select"),
-  readerMode: document.querySelector("#reader-mode"),
-  readerSegments: document.querySelector("#reader-segments"),
-  segmentNotesPanel: document.querySelector("#segment-notes-panel"),
-  notesExportButton: document.querySelector("#notes-export"),
-  messageLog: document.querySelector("#message-log"),
-  detailPanel: document.querySelector("#book-detail-panel"),
-  jobStatusPill: document.querySelector("#job-status-pill"),
-  jobProgressLabel: document.querySelector("#job-progress-label"),
-  jobProgressNumber: document.querySelector("#job-progress-number"),
-  jobProgressBar: document.querySelector("#job-progress-bar"),
-  overallProgressRing: document.querySelector("#overall-progress-ring"),
-  totalSegments: document.querySelector("#total-segments"),
-  translatedSegments: document.querySelector("#translated-segments"),
-  failedSegments: document.querySelector("#failed-segments"),
-  remainingSegments: document.querySelector("#remaining-segments"),
-  bookList: document.querySelector("#book-list"),
-  libraryTabs: document.querySelector(".library-tabs"),
-  bookFileInput: document.querySelector("#book-file"),
-  uploadDropzone: document.querySelector(".upload-dropzone"),
-};
-
-const endpoint = {
-  createBook: () => `${API_BASE}/books`,
-  listBooks: () => `${API_BASE}/books`,
-  listProviders: () => `${API_BASE}/providers`,
-  getBook: (bookId) => `${API_BASE}/books/${bookId}`,
-  updateTranslatedTitle: (bookId) => `${API_BASE}/books/${bookId}/translated-title`,
-  startTranslation: (bookId) => `${API_BASE}/books/${bookId}/translation-jobs`,
-  resumeTranslation: (bookId) => `${API_BASE}/books/${bookId}/translation-jobs/resume`,
-  cancelTranslation: (jobId) => `${API_BASE}/translation-jobs/${jobId}/cancel`,
-  exportZh: (bookId) => `${API_BASE}/books/${bookId}/exports/zh`,
-  exportBilingual: (bookId) => `${API_BASE}/books/${bookId}/exports/bilingual`,
-  consistencyReport: (bookId) => `${API_BASE}/books/${bookId}/reports/consistency`,
-  readerInfo: (bookId) => `${API_BASE}/books/${bookId}/reader/info`,
-  readerChapters: (bookId) => `${API_BASE}/books/${bookId}/chapters`,
-  readerSegments: (bookId, chapterId, mode) =>
-    `${API_BASE}/books/${bookId}/chapters/${chapterId}/segments?mode=${encodeURIComponent(mode)}`,
-  segmentNotes: (segmentId) => `${API_BASE}/segments/${segmentId}/notes`,
-  notesExport: (bookId) => `${API_BASE}/books/${bookId}/notes/export`,
-};
-
+// ==========================================
+// BOOT
+// ==========================================
 boot();
 
 function boot() {
   elements.apiBaseLabel.textContent = API_BASE;
-  bindEvents();
-  renderBookList();
+  state.activePage = normalizeRoute(window.location.hash);
+  bindEvents({ elements, state, actions: createActions() });
+  renderBookList({ elements, state });
   void loadBooks();
   void loadProviderProfiles();
 
@@ -123,112 +61,47 @@ function boot() {
     appendLog("系统已就绪，等待上传 EPUB 或加载现有书籍 ID。");
     render();
   }
+
+  ensureRouteHash();
 }
 
-function bindEvents() {
-  elements.uploadForm.addEventListener("submit", onUploadSubmit);
-  elements.lookupForm.addEventListener("submit", onLookupSubmit);
-  elements.translationForm.addEventListener("submit", onTranslateSubmit);
-  elements.translationProviderProfileSelect.addEventListener("change", onProviderProfileChange);
+function createActions() {
+  return {
+    appendLog,
+    applyRoute,
+    cancelCurrentTranslation,
+    downloadArtifact,
+    downloadNotesExport,
+    loadBook,
+    loadReaderSegments,
+    navigateTo,
+    onBookListClick,
+    onLookupSubmit,
+    onProviderProfileChange,
+    onReaderSegmentsClick,
+    onTranslateSubmit,
+    onUploadSubmit,
+    renderBookList: () => renderBookList({ elements, state }),
+    resumeTranslation,
+    updateTranslatedTitle,
+    useRememberedBook,
+  };
+}
 
-  if (elements.bookFileInput) {
-    elements.bookFileInput.addEventListener("change", (event) => {
-      const file = event.target.files?.[0];
-      const tip = document.querySelector("#upload-tip");
-      if (tip) {
-        if (file) {
-          tip.textContent = file.name;
-          if (elements.uploadDropzone) {
-            elements.uploadDropzone.style.borderColor = "var(--accent)";
-          }
-        } else {
-          tip.textContent = "上传 EPUB";
-          if (elements.uploadDropzone) {
-            elements.uploadDropzone.style.borderColor = "";
-          }
-        }
-      }
-    });
+// ==========================================
+// ACTIONS AND FORM HANDLERS
+// ==========================================
+async function onBookListClick(event) {
+  const row = event.target.closest("[data-book-id]");
+  if (!row) {
+    return;
   }
-  elements.refreshButton.addEventListener("click", () => {
-    if (state.currentBookId) {
-      void loadBook(state.currentBookId, { silent: false });
-    } else {
-      appendLog("当前没有已加载的书籍。");
-    }
-  });
-  elements.useLatestButton.addEventListener("click", () => {
-    const rememberedBookId = window.localStorage.getItem(STORAGE_KEY);
-    if (!rememberedBookId) {
-      appendLog("没有找到已记忆的书籍 ID。");
-      return;
-    }
-    elements.bookIdInput.value = rememberedBookId;
-    void loadBook(rememberedBookId, { silent: false });
-  });
-  elements.stopPollingButton.addEventListener("click", () => {
-    void cancelCurrentTranslation();
-  });
-  elements.resumeButton.addEventListener("click", () => {
-    void resumeTranslation();
-  });
-  elements.downloadZhButton.addEventListener("click", () => {
-    void downloadArtifact("zh");
-  });
-  elements.downloadBilingualButton.addEventListener("click", () => {
-    void downloadArtifact("bilingual");
-  });
-  elements.downloadConsistencyButton.addEventListener("click", () => {
-    void downloadArtifact("consistency_report");
-  });
-  elements.notesExportButton.addEventListener("click", () => {
-    void downloadNotesExport();
-  });
-  elements.bookList.addEventListener("click", (event) => {
-    const row = event.target.closest("[data-book-id]");
-    if (!row) {
-      return;
-    }
-    elements.bookIdInput.value = row.dataset.bookId;
-    void loadBook(row.dataset.bookId, { silent: false });
-  });
-  elements.libraryTabs.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-filter]");
-    if (!button) {
-      return;
-    }
-    state.activeBookFilter = button.dataset.filter;
-    renderBookList();
-  });
-  elements.bookMetadata.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-edit-translated-title]");
-    if (!button) {
-      return;
-    }
-    void updateTranslatedTitle();
-  });
-  elements.readerChapterSelect.addEventListener("change", () => {
-    state.selectedReaderChapterId = Number(elements.readerChapterSelect.value) || null;
-    void loadReaderSegments(state.currentBookId, state.selectedReaderChapterId);
-  });
-  elements.readerMode.addEventListener("change", () => {
-    state.selectedReaderMode = elements.readerMode.value || "bilingual";
-    if (state.currentBookId && state.selectedReaderChapterId) {
-      void loadReaderSegments(state.currentBookId, state.selectedReaderChapterId);
-    }
-  });
-  elements.readerSegments.addEventListener("click", (event) => {
-    const noteButton = event.target.closest("[data-create-segment-note]");
-    if (noteButton) {
-      void createSegmentNote(noteButton.dataset.createSegmentNote);
-      return;
-    }
-    const segment = event.target.closest("[data-reader-segment-id]");
-    if (segment) {
-      state.selectedReaderSegmentId = Number(segment.dataset.readerSegmentId) || null;
-      void loadSegmentNotes(state.selectedReaderSegmentId);
-    }
-  });
+  const bookId = row.dataset.bookId;
+  if (!bookId) {
+    return;
+  }
+  elements.bookIdInput.value = bookId;
+  await loadBook(bookId, { silent: false });
 }
 
 async function onUploadSubmit(event) {
@@ -277,6 +150,7 @@ async function onUploadSubmit(event) {
     }
     await loadBooks({ silent: true });
     await loadBook(createdBookId, { silent: true });
+    navigateTo("translate");
   } catch (error) {
     appendLog(normalizeError(error, "上传失败。"));
   } finally {
@@ -322,6 +196,7 @@ async function onTranslateSubmit(event) {
     appendLog(normalizeError(error, "启动翻译失败。"));
   } finally {
     setBusy(elements.translateButton, false, "开始翻译");
+    render();
   }
 }
 
@@ -352,6 +227,7 @@ async function resumeTranslation() {
     appendLog(normalizeError(error, "恢复翻译失败。"));
   } finally {
     setBusy(elements.resumeButton, false, "恢复任务");
+    render();
   }
 }
 
@@ -378,834 +254,8 @@ async function cancelCurrentTranslation() {
     appendLog(normalizeError(error, "取消任务失败。"));
   } finally {
     setBusy(elements.stopPollingButton, false, "取消当前任务");
-  }
-}
-
-async function loadBook(bookId, options = {}) {
-  const normalizedBookId = String(bookId).trim();
-  if (!normalizedBookId) {
-    return;
-  }
-
-  if (!options.silent) {
-    appendLog(`正在加载书籍 #${normalizedBookId}。`);
-  }
-
-  try {
-    const response = await fetchJson(endpoint.getBook(normalizedBookId), {
-      method: "GET",
-    });
-
-    state.currentBookId = Number(response.book?.id ?? normalizedBookId);
-    state.currentBookDetail = response;
-    state.readerInfo = null;
-    state.readerChapters = [];
-    state.readerSegments = [];
-    state.selectedReaderChapterId = null;
-    state.selectedReaderSegmentId = null;
-    state.selectedReaderNotes = [];
-
-    window.localStorage.setItem(STORAGE_KEY, String(state.currentBookId));
-    updateUrlBookId(state.currentBookId);
     render();
-    await loadReader(state.currentBookId, { silent: options.silent });
-
-    appendLog(
-      `已载入《${displayBookTitle(response.book) || "未命名"}》 (#${state.currentBookId})。`
-    );
-
-    if (shouldPoll(response.current_job)) {
-      startPolling();
-    } else {
-      stopPolling();
-    }
-  } catch (error) {
-    appendLog(normalizeError(error, `加载书籍 #${normalizedBookId} 失败。`));
   }
-}
-
-async function loadBooks(options = {}) {
-  try {
-    const response = await fetchJson(endpoint.listBooks(), {
-      method: "GET",
-    });
-    state.books = Array.isArray(response?.books) ? response.books : [];
-    state.statusCounts = response?.status_counts || null;
-    renderBookList();
-    if (!options.silent) {
-      appendLog(`已加载 ${state.books.length} 本书籍。`);
-    }
-    setApiConnectionStatus(true);
-  } catch (error) {
-    setApiConnectionStatus(false);
-    if (!options.silent) {
-      appendLog(normalizeError(error, "加载书籍列表失败。"));
-    }
-  }
-}
-
-function render() {
-  const detail = state.currentBookDetail;
-  const book = detail?.book;
-  const job = detail?.current_job;
-
-  elements.currentBookLabel.textContent = book
-    ? `${displayBookTitle(book)} · #${book.id}`
-    : "未选择";
-
-  const bigBookCover = document.querySelector("#book-cover");
-  if (bigBookCover && book) {
-    bigBookCover.style.background = getBookCoverStyle(book);
-    const coverSpan = bigBookCover.querySelector("span");
-    if (coverSpan) {
-      coverSpan.textContent = bookCoverInitials(book);
-    }
-  }
-
-  renderBookMetadata(book, job);
-  renderJob(job, detail?.chapters ?? []);
-  renderExports(detail?.artifacts ?? []);
-  renderChapters(detail?.chapters ?? [], job);
-  renderReaderChapterOptions(state.readerChapters);
-  renderReaderSegments();
-  renderSegmentNotesPanel();
-  renderBookList();
-  renderProviderProfileSummary();
-  renderLog();
-
-  elements.detailPanel.classList.toggle("is-empty", !book);
-  elements.readerPanel.classList.toggle("is-empty", !book);
-}
-
-function renderBookMetadata(book, job, options = {}) {
-  if (!book) {
-    elements.bookMetadata.innerHTML = `
-      <div>
-        <dt>状态</dt>
-        <dd>请先载入或上传一本书。</dd>
-      </div>
-    `;
-    return;
-  }
-
-  const createdAt = formatDateTime(book.created_at);
-  const translatedTitle = options.isPreview
-    ? book.translated_title
-    : renderTranslatedTitle(book);
-  const sourceLanguage = sourceLanguageLabel(book.source_language);
-
-  elements.bookMetadata.innerHTML = `
-    <div>
-      <dt>原标题</dt>
-      <dd>${escapeHtml(book.title)}</dd>
-    </div>
-    <div>
-      <dt>译后标题</dt>
-      <dd>${escapeHtml(translatedTitle || "待生成")} <button class="text-button inline-action" type="button" data-edit-translated-title>编辑</button></dd>
-    </div>
-    <div>
-      <dt>书籍 ID</dt>
-      <dd>${escapeHtml(book.id)}</dd>
-    </div>
-    <div>
-      <dt>文件名</dt>
-      <dd>${escapeHtml(book.filename)}</dd>
-    </div>
-    <div>
-      <dt>源语言</dt>
-      <dd>${escapeHtml(sourceLanguage)}</dd>
-    </div>
-    <div>
-      <dt>创建时间</dt>
-      <dd>${escapeHtml(createdAt)}</dd>
-    </div>
-  `;
-}
-
-function renderBookList() {
-  renderLibraryTabs();
-  if (!state.books.length) {
-    elements.bookList.innerHTML =
-      '<div class="empty-state">暂无书籍。上传 EPUB 后会出现在这里。</div>';
-    return;
-  }
-
-  const filteredBooks = state.books.filter((book) => {
-    if (state.activeBookFilter === "all") {
-      return true;
-    }
-    return String(book.status || "").toLowerCase() === state.activeBookFilter;
-  });
-
-  if (!filteredBooks.length) {
-    elements.bookList.innerHTML =
-      '<div class="empty-state">当前筛选下没有书籍。</div>';
-    return;
-  }
-
-  elements.bookList.innerHTML = filteredBooks
-    .map((book) => {
-      const status = String(book.status || "pending").toLowerCase();
-      const activeClass = Number(book.id) === Number(state.currentBookId) ? " active" : "";
-      const coverStyle = getBookCoverStyle(book);
-      return `
-        <article class="book-row${activeClass}" data-book-id="${escapeHtml(book.id)}" role="button" tabindex="0">
-          <div class="mini-cover" style="background: ${coverStyle};" aria-hidden="true"><span>${escapeHtml(bookCoverInitials(book))}</span></div>
-          <div>
-            <h2>${escapeHtml(displayBookTitle(book) || "未命名书籍")}</h2>
-            <p>${escapeHtml(book.filename || "-")}</p>
-            <span>${escapeHtml(sourceLanguageLabel(book.source_language))} → 中文</span>
-          </div>
-          <time>${escapeHtml(formatDateTime(book.updated_at || book.created_at))}</time>
-          <strong class="book-status ${bookStatusClass(status)}">${escapeHtml(translateStatus(status))}</strong>
-        </article>
-      `;
-    })
-    .join("");
-}
-
-function renderLibraryTabs() {
-  const counts = state.statusCounts || countBooksByStatus(state.books);
-  const tabs = [
-    ["all", "全部", counts.total],
-    ["running", "进行中", counts.running],
-    ["completed", "已完成", counts.completed],
-    ["failed", "失败", counts.failed],
-  ];
-  elements.libraryTabs.innerHTML = tabs
-    .map(([filter, label, count]) => {
-      const activeClass = state.activeBookFilter === filter ? " active" : "";
-      return `<button class="tab-button${activeClass}" type="button" data-filter="${filter}">${label} <span>${formatNumber(count)}</span></button>`;
-    })
-    .join("");
-}
-
-function countBooksByStatus(books) {
-  return books.reduce(
-    (counts, book) => {
-      counts.total += 1;
-      const status = String(book.status || "").toLowerCase();
-      if (status === "running") {
-        counts.running += 1;
-      } else if (status === "completed") {
-        counts.completed += 1;
-      } else if (status === "failed") {
-        counts.failed += 1;
-      }
-      return counts;
-    },
-    { total: 0, running: 0, completed: 0, failed: 0 }
-  );
-}
-
-function renderJob(job, chapters) {
-  const totals = chapters.reduce(
-    (accumulator, chapter) => {
-      accumulator.total += Number(chapter.total_segments) || 0;
-      accumulator.translated += Number(chapter.translated_segments) || 0;
-      accumulator.failed += Number(chapter.failed_segments) || 0;
-      return accumulator;
-    },
-    { total: 0, translated: 0, failed: 0 }
-  );
-  const summaryTotals = totalsFromJob(job, totals);
-  const percentage = clampPercentage((job?.progress ?? progressFromChapters(summaryTotals)) * 100);
-  const badge = statusBadgeClass(job?.status);
-  const remaining = Math.max(0, summaryTotals.total - summaryTotals.translated - summaryTotals.failed);
-
-  elements.jobStatusPill.className = `status-pill ${badge}`;
-  elements.jobStatusPill.textContent = translateStatus(job?.status ?? "idle");
-  elements.jobProgressNumber.textContent = `${Math.round(percentage)}%`;
-  elements.jobProgressBar.style.width = `${percentage}%`;
-  elements.overallProgressRing.style.setProperty("--progress", `${percentage}%`);
-  elements.overallProgressRing.setAttribute("aria-label", `整体进度 ${Math.round(percentage)}%`);
-  elements.totalSegments.textContent = formatNumber(summaryTotals.total);
-  elements.translatedSegments.textContent = formatNumber(summaryTotals.translated);
-  elements.failedSegments.textContent = formatNumber(summaryTotals.failed);
-  elements.remainingSegments.textContent = formatNumber(remaining);
-  elements.jobProgressLabel.textContent = job
-    ? `预计剩余时间：${estimateRemainingTime(job, summaryTotals, percentage)}`
-    : "当前没有活动任务";
-}
-
-function renderExports(artifacts) {
-  const byKind = new Map(artifacts.map((artifact) => [artifact.kind, artifact]));
-  const cards = [
-    renderExportCard("zh", "中文 EPUB", byKind.get("zh")),
-    renderExportCard("bilingual", "中英双语 EPUB", byKind.get("bilingual")),
-    renderExportCard("consistency_report", "一致性报告", byKind.get("consistency_report")),
-  ];
-  elements.exportList.innerHTML = cards.join("");
-}
-
-function renderExportCard(kind, label, artifact) {
-  const status = translateStatus(artifact?.status ?? "pending");
-  const sizeText = artifact?.size ? formatBytes(artifact.size) : "等待生成";
-
-  return `
-    <article>
-      <strong>${escapeHtml(label)}</strong>
-      <span>${escapeHtml(status)} · ${escapeHtml(sizeText)}</span>
-    </article>
-  `;
-}
-
-function renderChapters(chapters, job) {
-  if (!chapters.length) {
-    elements.chaptersList.innerHTML =
-      '<div class="empty-state">载入书籍后，这里会显示章节进度。</div>';
-    return;
-  }
-
-  const totals = chapters.reduce(
-    (accumulator, chapter) => {
-      accumulator.total += Number(chapter.total_segments) || 0;
-      accumulator.translated += Number(chapter.translated_segments) || 0;
-      accumulator.failed += Number(chapter.failed_segments) || 0;
-      return accumulator;
-    },
-    { total: 0, translated: 0, failed: 0 }
-  );
-  const summaryTotals = totalsFromJob(job, totals);
-  const overallProgress = summaryTotals.total > 0
-    ? (summaryTotals.translated / summaryTotals.total) * 100
-    : 0;
-  const rows = chapters
-    .map((chapter) => {
-      const total = Number(chapter.total_segments) || 0;
-      const translated = Number(chapter.translated_segments) || 0;
-      const failed = Number(chapter.failed_segments) || 0;
-      const progress = total > 0 ? (translated / total) * 100 : 0;
-
-      return `
-        <tr>
-          <td>${escapeHtml(chapter.order)}. ${escapeHtml(chapter.title)}</td>
-          <td>${formatNumber(total)}</td>
-          <td>${formatNumber(translated)}</td>
-          <td>${formatNumber(failed)}</td>
-          <td>
-            <span class="row-progress"><i style="width:${clampPercentage(progress)}%"></i></span>
-            <strong>${Math.round(progress)}%</strong>
-          </td>
-        </tr>
-      `;
-    })
-    .join("");
-
-  elements.chaptersList.innerHTML = `
-    <table>
-      <thead>
-        <tr>
-          <th>章节</th>
-          <th>段落数</th>
-          <th>已翻译</th>
-          <th>失败</th>
-          <th>进度</th>
-        </tr>
-      </thead>
-      <tbody>${rows}</tbody>
-      <tfoot>
-        <tr>
-          <td>总计</td>
-          <td>${formatNumber(summaryTotals.total)}</td>
-          <td>${formatNumber(summaryTotals.translated)}</td>
-          <td>${formatNumber(summaryTotals.failed)}</td>
-          <td>
-            <span class="row-progress"><i style="width:${clampPercentage(overallProgress)}%"></i></span>
-            <strong>${Math.round(overallProgress)}%</strong>
-          </td>
-        </tr>
-      </tfoot>
-    </table>
-  `;
-}
-
-async function loadReader(bookId, options = {}) {
-  const normalizedBookId = Number(bookId) || null;
-  if (!normalizedBookId) {
-    state.readerInfo = null;
-    state.readerChapters = [];
-    state.readerSegments = [];
-    state.selectedReaderChapterId = null;
-    state.selectedReaderSegmentId = null;
-    state.selectedReaderNotes = [];
-    renderReaderChapterOptions([]);
-    renderReaderSegments();
-    renderSegmentNotesPanel();
-    return;
-  }
-
-  try {
-    const [info, chaptersResponse] = await Promise.all([
-      fetchJson(endpoint.readerInfo(normalizedBookId), { method: "GET" }),
-      fetchJson(endpoint.readerChapters(normalizedBookId), { method: "GET" }),
-    ]);
-
-    state.readerInfo = info || null;
-    state.readerChapters = Array.isArray(chaptersResponse?.chapters) ? chaptersResponse.chapters : [];
-    state.selectedReaderChapterId = pickReaderChapterId(state.readerChapters, state.selectedReaderChapterId);
-    renderReaderChapterOptions(state.readerChapters);
-
-    if (state.selectedReaderChapterId) {
-      await loadReaderSegments(normalizedBookId, state.selectedReaderChapterId, { silent: options.silent });
-    } else {
-      state.readerSegments = [];
-      state.selectedReaderSegmentId = null;
-      state.selectedReaderNotes = [];
-      renderReaderSegments();
-      renderSegmentNotesPanel();
-    }
-  } catch (error) {
-    state.readerInfo = null;
-    state.readerChapters = [];
-    state.readerSegments = [];
-    state.selectedReaderChapterId = null;
-    state.selectedReaderSegmentId = null;
-    state.selectedReaderNotes = [];
-    renderReaderChapterOptions([]);
-    renderReaderSegments();
-    renderSegmentNotesPanel();
-    if (!options.silent) {
-      appendLog(normalizeError(error, "加载阅读器内容失败。"));
-    }
-  }
-}
-
-async function loadReaderSegments(bookId, chapterId, options = {}) {
-  const normalizedBookId = Number(bookId) || null;
-  const normalizedChapterId = Number(chapterId) || null;
-  if (!normalizedBookId || !normalizedChapterId) {
-    state.readerSegments = [];
-    state.selectedReaderSegmentId = null;
-    state.selectedReaderNotes = [];
-    renderReaderSegments();
-    renderSegmentNotesPanel();
-    return;
-  }
-
-  const mode = elements.readerMode?.value || state.selectedReaderMode || "bilingual";
-  state.selectedReaderMode = mode;
-
-  try {
-    const response = await fetchJson(
-      endpoint.readerSegments(normalizedBookId, normalizedChapterId, mode),
-      { method: "GET" }
-    );
-
-    state.readerSegments = Array.isArray(response?.segments) ? response.segments : [];
-    state.selectedReaderChapterId = Number(response?.chapterId ?? normalizedChapterId) || normalizedChapterId;
-    state.selectedReaderSegmentId = pickReaderSegmentId(state.readerSegments, state.selectedReaderSegmentId);
-    renderReaderSegments(response);
-
-    if (state.selectedReaderSegmentId) {
-      await loadSegmentNotes(state.selectedReaderSegmentId, { silent: true });
-    } else {
-      state.selectedReaderNotes = [];
-      renderSegmentNotesPanel();
-    }
-  } catch (error) {
-    state.readerSegments = [];
-    state.selectedReaderSegmentId = null;
-    state.selectedReaderNotes = [];
-    renderReaderSegments();
-    renderSegmentNotesPanel();
-    if (!options.silent) {
-      appendLog(normalizeError(error, "加载段落失败。"));
-    }
-  }
-}
-
-async function loadSegmentNotes(segmentId, options = {}) {
-  const normalizedSegmentId = Number(segmentId) || null;
-  if (!normalizedSegmentId) {
-    state.selectedReaderNotes = [];
-    renderSegmentNotesPanel();
-    return;
-  }
-
-  try {
-    const response = await fetchJson(endpoint.segmentNotes(normalizedSegmentId), {
-      method: "GET",
-    });
-    state.selectedReaderSegmentId = normalizedSegmentId;
-    state.selectedReaderNotes = Array.isArray(response) ? response : [];
-    renderSegmentNotesPanel();
-  } catch (error) {
-    state.selectedReaderNotes = [];
-    renderSegmentNotesPanel();
-    if (!options.silent) {
-      appendLog(normalizeError(error, "加载段落笔记失败。"));
-    }
-  }
-}
-
-async function createSegmentNote(segmentId) {
-  const normalizedSegmentId = Number(segmentId) || null;
-  if (!normalizedSegmentId) {
-    appendLog("请选择一个有效的段落后再创建笔记。");
-    return;
-  }
-
-  const content = window.prompt("笔记内容", "");
-  if (content === null) {
-    return;
-  }
-
-  const trimmed = content.trim();
-  if (!trimmed) {
-    appendLog("笔记内容不能为空。");
-    return;
-  }
-
-  try {
-    await fetchJson(endpoint.segmentNotes(normalizedSegmentId), {
-      method: "POST",
-      body: JSON.stringify({
-        content: trimmed,
-        highlightColor: "#fff5db",
-      }),
-    });
-    appendLog(`已为段落 #${normalizedSegmentId} 创建笔记。`);
-    await loadSegmentNotes(normalizedSegmentId, { silent: true });
-    if (state.currentBookId && state.selectedReaderChapterId) {
-      await loadReaderSegments(state.currentBookId, state.selectedReaderChapterId, { silent: true });
-    }
-  } catch (error) {
-    appendLog(normalizeError(error, "创建笔记失败。"));
-  }
-}
-
-async function downloadNotesExport() {
-  if (!state.currentBookId) {
-    appendLog("请先加载书籍，再导出笔记。");
-    return;
-  }
-
-  appendLog(`请求导出书籍 #${state.currentBookId} 的笔记。`);
-
-  try {
-    const response = await fetch(endpoint.notesExport(state.currentBookId), {
-      method: "GET",
-      headers: {
-        Accept: "text/markdown",
-      },
-    });
-
-    const contentType = response.headers.get("content-type") || "";
-    if (!response.ok) {
-      if (contentType.includes("application/json")) {
-        const payload = await response.json();
-        throw new Error(payload.message || payload.detail || "导出失败。");
-      }
-      throw new Error(`导出失败，状态码 ${response.status}。`);
-    }
-
-    const text = await response.text();
-    const blob = new Blob([text], { type: "text/markdown;charset=utf-8" });
-    const objectUrl = window.URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = objectUrl;
-    anchor.download = `book-${state.currentBookId}-notes.md`;
-    document.body.append(anchor);
-    anchor.click();
-    anchor.remove();
-    window.URL.revokeObjectURL(objectUrl);
-    appendLog("笔记 Markdown 导出已开始。");
-  } catch (error) {
-    appendLog(normalizeError(error, "导出笔记失败。"));
-  }
-}
-
-function renderLog() {
-  if (!state.activity.length) {
-    elements.messageLog.innerHTML =
-      '<div class="empty-state">暂无活动记录。你的操作和服务端返回会显示在这里。</div>';
-    return;
-  }
-
-  elements.messageLog.innerHTML = state.activity
-    .slice(0, 10)
-    .map(
-      (entry) => `
-        <article class="log-entry">
-          <span class="log-time">${escapeHtml(entry.time)}</span>
-          <p class="log-message">${escapeHtml(entry.message)}</p>
-        </article>
-      `
-    )
-    .join("");
-}
-
-function renderReaderChapterOptions(chapters = state.readerChapters) {
-  const select = elements.readerChapterSelect;
-  if (!select) {
-    return;
-  }
-
-  const chapterList = Array.isArray(chapters) ? chapters : [];
-  if (!chapterList.length) {
-    select.disabled = true;
-    select.innerHTML = '<option value="">暂无章节</option>';
-    if (elements.notesExportButton) {
-      elements.notesExportButton.disabled = true;
-    }
-    return;
-  }
-
-  select.disabled = false;
-  if (elements.notesExportButton) {
-    elements.notesExportButton.disabled = false;
-  }
-  select.innerHTML = chapterList
-    .map((chapter) => {
-      const chapterId = pickChapterId(chapter);
-      const chapterOrder = Number(chapter?.chapterOrder ?? chapter?.order ?? 0) || 0;
-      const title = chapter?.title || `章节 ${chapterOrder || chapterId}`;
-      return `<option value="${escapeHtml(chapterId)}">#${escapeHtml(chapterOrder || chapterId)} · ${escapeHtml(title)}</option>`;
-    })
-    .join("");
-
-  const selectedChapterId = pickReaderChapterId(chapterList, state.selectedReaderChapterId);
-  state.selectedReaderChapterId = selectedChapterId;
-  if (selectedChapterId) {
-    select.value = String(selectedChapterId);
-  }
-}
-
-function renderReaderSegments(response = null) {
-  const container = elements.readerSegments;
-  if (!container) {
-    return;
-  }
-
-  const segments = Array.isArray(response?.segments) ? response.segments : state.readerSegments;
-  if (!segments.length) {
-    container.innerHTML = '<div class="empty-state">当前章节没有可显示的段落。</div>';
-    return;
-  }
-
-  const mode = elements.readerMode?.value || state.selectedReaderMode || "bilingual";
-  state.selectedReaderMode = mode;
-
-  container.innerHTML = segments
-    .map((segment) => renderReaderSegment(segment, mode))
-    .join("");
-}
-
-function renderReaderSegment(segment, mode) {
-  const segmentId = pickSegmentId(segment);
-  const order = Number(segment?.order ?? 0) || 0;
-  const translationStatus = String(segment?.translationStatus || segment?.translation_status || "").trim();
-  const noteCount = Number(segment?.noteCount ?? segment?.note_count ?? 0) || 0;
-  const activeClass = Number(segmentId) === Number(state.selectedReaderSegmentId) ? " active" : "";
-  const layoutClass = mode === "bilingual" ? " bilingual" : " single";
-  const sourceText = escapeHtml(segment?.sourceText || segment?.source_text || "暂无原文");
-  const translatedText = escapeHtml(segment?.translatedText || segment?.translated_text || "暂无译文");
-  const typeLabel = escapeHtml(segment?.type || "segment");
-  const noteLabel = noteCount > 0 ? `笔记 ${formatNumber(noteCount)}` : "添加笔记";
-  const sourceBlock = `
-    <div class="reader-segment-column reader-segment-source">
-      <span class="reader-segment-kicker">原文</span>
-      <p>${sourceText}</p>
-    </div>
-  `;
-  const translatedBlock = `
-    <div class="reader-segment-column reader-segment-translated">
-      <span class="reader-segment-kicker">译文</span>
-      <p>${translatedText}</p>
-    </div>
-  `;
-  const body = mode === "translated"
-    ? translatedBlock
-    : mode === "original"
-      ? sourceBlock
-      : `${sourceBlock}${translatedBlock}`;
-
-  return `
-    <article class="reader-segment${layoutClass}${activeClass}" data-reader-segment-id="${escapeHtml(segmentId)}" role="button" tabindex="0">
-      <header class="reader-segment-head">
-        <div class="reader-segment-meta">
-          <strong>段落 #${escapeHtml(order || segmentId)}</strong>
-          <span>${typeLabel}</span>
-          <span class="status-pill ${statusBadgeClass(translationStatus)}">${escapeHtml(translateStatus(translationStatus))}</span>
-        </div>
-        <button class="text-button reader-note-button" type="button" data-create-segment-note="${escapeHtml(segmentId)}">${escapeHtml(noteLabel)}</button>
-      </header>
-      <div class="reader-segment-body">
-        ${body}
-      </div>
-    </article>
-  `;
-}
-
-function renderSegmentNotesPanel() {
-  const panel = elements.segmentNotesPanel;
-  if (!panel) {
-    return;
-  }
-
-  const segment = getSelectedReaderSegment();
-  const notes = Array.isArray(state.selectedReaderNotes) ? state.selectedReaderNotes : [];
-  if (!segment) {
-    panel.innerHTML =
-      '<div class="segment-notes-empty empty-state">选择一个段落后，笔记会显示在这里。</div>';
-    return;
-  }
-
-  const sourcePreview = escapeHtml((segment.sourceText || segment.source_text || "").trim() || "暂无原文");
-  panel.innerHTML = `
-    <div class="segment-notes-header">
-      <div>
-        <strong>段落 #${escapeHtml(segment.order || segment.segmentOrder || segment.segment_id || segment.segmentId || 0)}</strong>
-        <p>${sourcePreview}</p>
-      </div>
-      <button class="text-button" type="button" data-create-segment-note="${escapeHtml(pickSegmentId(segment))}">新建笔记</button>
-    </div>
-    <div class="segment-notes-list">
-      ${
-        notes.length
-          ? notes
-            .map(
-              (note) => `
-                <article class="segment-note-card">
-                  <header>
-                    <strong>${escapeHtml(note.createdBy || note.created_by || "local")}</strong>
-                    <time>${escapeHtml(formatDateTime(note.createdAt || note.created_at))}</time>
-                  </header>
-                  <p>${escapeHtml(note.content || note.note_content || "")}</p>
-                </article>
-              `
-            )
-            .join("")
-          : '<div class="empty-state">这个段落还没有笔记。</div>'
-      }
-    </div>
-  `;
-}
-
-function pickReaderChapterId(chapters, preferredChapterId) {
-  if (!Array.isArray(chapters) || !chapters.length) {
-    return null;
-  }
-
-  const preferred = Number(preferredChapterId) || null;
-  if (preferred && chapters.some((chapter) => Number(pickChapterId(chapter)) === preferred)) {
-    return preferred;
-  }
-
-  return pickChapterId(chapters[0]);
-}
-
-function pickReaderSegmentId(segments, preferredSegmentId) {
-  if (!Array.isArray(segments) || !segments.length) {
-    return null;
-  }
-
-  const preferred = Number(preferredSegmentId) || null;
-  if (preferred && segments.some((segment) => Number(pickSegmentId(segment)) === preferred)) {
-    return preferred;
-  }
-
-  return pickSegmentId(segments[0]);
-}
-
-function pickChapterId(chapter) {
-  return Number(chapter?.chapterId ?? chapter?.id ?? 0) || null;
-}
-
-function pickSegmentId(segment) {
-  return Number(segment?.segmentId ?? segment?.id ?? 0) || null;
-}
-
-function getSelectedReaderSegment() {
-  const segmentId = Number(state.selectedReaderSegmentId) || null;
-  if (!segmentId) {
-    return null;
-  }
-  return state.readerSegments.find((segment) => Number(pickSegmentId(segment)) === segmentId) || null;
-}
-
-async function loadProviderProfiles() {
-  try {
-    const response = await fetchJson(endpoint.listProviders(), {
-      method: "GET",
-    });
-    state.providerProfiles = Array.isArray(response?.providers) ? response.providers : [];
-    state.defaultProviderProfileName = String(
-      response?.default_profile_name
-      || state.providerProfiles[0]?.profile_name
-      || state.providerProfiles[0]?.name
-      || ""
-    ).trim() || null;
-    ensureSelectedProviderProfile();
-    renderProviderProfileSummary();
-    setApiConnectionStatus(true);
-    appendLog(
-      state.providerProfiles.length
-        ? `已加载 ${state.providerProfiles.length} 个翻译配置档，当前选择 ${describeSelectedProviderProfile()}。`
-        : "后端没有返回可用的翻译配置档。"
-    );
-  } catch (error) {
-    state.providerProfiles = FALLBACK_PROVIDER_PROFILES;
-    state.defaultProviderProfileName = FALLBACK_PROVIDER_PROFILES[0].profile_name;
-    ensureSelectedProviderProfile();
-    renderProviderProfileSummary();
-    setApiConnectionStatus(false);
-    appendLog(`${normalizeError(error, "加载翻译配置档失败。")} 已使用本地预览配置。`);
-  }
-}
-
-function onProviderProfileChange(event) {
-  state.selectedProviderProfileName = String(event.target.value || "").trim() || null;
-  if (state.selectedProviderProfileName) {
-    window.localStorage.setItem(PROVIDER_PROFILE_STORAGE_KEY, state.selectedProviderProfileName);
-  } else {
-    window.localStorage.removeItem(PROVIDER_PROFILE_STORAGE_KEY);
-  }
-  renderProviderProfileSummary();
-  appendLog(`翻译配置档已切换为 ${describeSelectedProviderProfile()}。`);
-}
-
-function renderProviderProfileSummary() {
-  const select = elements.translationProviderProfileSelect;
-  const summary = elements.translationProviderSummary;
-  const profiles = state.providerProfiles;
-
-  if (!profiles.length) {
-    select.disabled = true;
-    select.innerHTML = '<option value="">未找到可用配置</option>';
-    summary.textContent = "当前没有可用的翻译配置档。";
-    elements.providerStatusLabel.textContent = "不可用";
-    return;
-  }
-
-  ensureSelectedProviderProfile();
-  select.disabled = false;
-  select.innerHTML = profiles
-    .map((profile) => {
-      const profileName = profileIdentifier(profile);
-      const suffix = profile.is_default ? "（默认）" : "";
-      return `<option value="${escapeHtml(profileName)}">${escapeHtml(profileName)}${suffix}</option>`;
-    })
-    .join("");
-  select.value = state.selectedProviderProfileName || "";
-
-  const selectedProfile = getSelectedProviderProfile();
-  if (!selectedProfile) {
-    summary.textContent = "请选择一个翻译配置档。";
-    elements.providerStatusLabel.textContent = "未选择";
-    return;
-  }
-
-  const providerName = selectedProfile.provider_name || "-";
-  const modelName = selectedProfile.default_model_name || "-";
-  const configuredText = selectedProfile.configured ? "已配置" : "未配置";
-  const rpmLimit = selectedProfile.max_requests_per_minute ?? "-";
-  const globalConcurrency = selectedProfile.global_max_concurrency ?? "-";
-  const perChapterConcurrency = selectedProfile.per_chapter_concurrency ?? "-";
-  elements.providerStatusLabel.textContent = `${providerName} (${modelName})`;
-  summary.textContent =
-    `当前将使用配置档 ${profileIdentifier(selectedProfile)}，provider 为 ${providerName}，模型为 ${modelName}，RPM 上限 ${rpmLimit}，全局并发 ${globalConcurrency}，单章并发 ${perChapterConcurrency}，状态 ${configuredText}。`;
 }
 
 async function updateTranslatedTitle() {
@@ -1337,148 +387,395 @@ async function downloadArtifact(kind) {
   }
 }
 
-function appendLog(message) {
-  const timestamp = new Date().toLocaleTimeString("zh-CN", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-
-  state.activity.unshift({
-    time: timestamp,
-    message,
-  });
-  renderLog();
-}
-
-function startPolling() {
+async function downloadNotesExport() {
   if (!state.currentBookId) {
+    appendLog("请先加载书籍，再导出笔记。");
     return;
   }
-  stopPolling();
-  state.pollTimer = window.setInterval(() => {
-    void loadBook(state.currentBookId, { silent: true });
-  }, POLL_INTERVAL_MS);
-  elements.pollingLabel.textContent = `每 ${Math.round(POLL_INTERVAL_MS / 1000)} 秒`;
-}
 
-function stopPolling() {
-  if (state.pollTimer) {
-    window.clearInterval(state.pollTimer);
-    state.pollTimer = null;
+  appendLog(`请求导出书籍 #${state.currentBookId} 的笔记。`);
+
+  try {
+    const response = await fetch(endpoint.notesExport(state.currentBookId), {
+      method: "GET",
+      headers: {
+        Accept: "text/markdown",
+      },
+    });
+
+    const contentType = response.headers.get("content-type") || "";
+    if (!response.ok) {
+      if (contentType.includes("application/json")) {
+        const payload = await response.json();
+        throw new Error(payload.message || payload.detail || "导出失败。");
+      }
+      throw new Error(`导出失败，状态码 ${response.status}。`);
+    }
+
+    const text = await response.text();
+    const blob = new Blob([text], { type: "text/markdown;charset=utf-8" });
+    const objectUrl = window.URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = `book-${state.currentBookId}-notes.md`;
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    window.URL.revokeObjectURL(objectUrl);
+    appendLog("笔记 Markdown 导出已开始。");
+  } catch (error) {
+    appendLog(normalizeError(error, "导出笔记失败。"));
   }
-  elements.pollingLabel.textContent = "空闲";
 }
 
-function shouldPoll(job) {
-  return Boolean(job && ["pending", "running"].includes(job.status));
+function onReaderSegmentsClick(event) {
+  const noteButton = event.target.closest("[data-create-segment-note]");
+  if (noteButton) {
+    void createSegmentNote(noteButton.dataset.createSegmentNote);
+    return;
+  }
+  const segment = event.target.closest("[data-reader-segment-id]");
+  if (segment) {
+    state.selectedReaderSegmentId = Number(segment.dataset.readerSegmentId) || null;
+    void loadSegmentNotes(state.selectedReaderSegmentId);
+  }
 }
 
-async function fetchJson(url, options = {}) {
-  const isFormData = options.body instanceof FormData;
-  const response = await fetch(url, {
-    ...options,
-    headers: {
-      Accept: "application/json",
-      ...(isFormData ? {} : { "Content-Type": "application/json" }),
-      ...(options.headers || {}),
+async function createSegmentNote(segmentId) {
+  const normalizedSegmentId = Number(segmentId) || null;
+  if (!normalizedSegmentId) {
+    appendLog("请选择一个有效的段落后再创建笔记。");
+    return;
+  }
+
+  const content = window.prompt("笔记内容", "");
+  if (content === null) {
+    return;
+  }
+
+  const trimmed = content.trim();
+  if (!trimmed) {
+    appendLog("笔记内容不能为空。");
+    return;
+  }
+
+  try {
+    await fetchJson(endpoint.segmentNotes(normalizedSegmentId), {
+      method: "POST",
+      body: JSON.stringify({
+        content: trimmed,
+        highlightColor: "#fff5db",
+      }),
+    });
+    appendLog(`已为段落 #${normalizedSegmentId} 创建笔记。`);
+    await loadSegmentNotes(normalizedSegmentId, { silent: true });
+    if (state.currentBookId && state.selectedReaderChapterId) {
+      await loadReaderSegments(state.currentBookId, state.selectedReaderChapterId, { silent: true });
+    }
+  } catch (error) {
+    appendLog(normalizeError(error, "创建笔记失败。"));
+  }
+}
+
+function useRememberedBook() {
+  const rememberedBookId = window.localStorage.getItem(STORAGE_KEY);
+  if (!rememberedBookId) {
+    appendLog("没有找到已记忆的书籍 ID。");
+    return;
+  }
+  elements.bookIdInput.value = rememberedBookId;
+  void loadBook(rememberedBookId, { silent: false });
+}
+
+// ==========================================
+// DATA LOADING
+// ==========================================
+async function loadBook(bookId, options = {}) {
+  const normalizedBookId = String(bookId).trim();
+  if (!normalizedBookId) {
+    return;
+  }
+
+  if (!options.silent) {
+    appendLog(`正在加载书籍 #${normalizedBookId}。`);
+  }
+
+  try {
+    const response = await fetchJson(endpoint.getBook(normalizedBookId), {
+      method: "GET",
+    });
+
+    state.currentBookId = Number(response.book?.id ?? normalizedBookId);
+    state.currentBookDetail = response;
+    state.readerInfo = null;
+    state.readerChapters = [];
+    state.readerSegments = [];
+    state.selectedReaderChapterId = null;
+    state.selectedReaderSegmentId = null;
+    state.selectedReaderNotes = [];
+
+    window.localStorage.setItem(STORAGE_KEY, String(state.currentBookId));
+    updateUrlBookId(state.currentBookId);
+    render();
+    await loadReader(state.currentBookId, { silent: options.silent });
+
+    appendLog(
+      `已载入《${displayBookTitle(response.book) || "未命名"}》 (#${state.currentBookId})。`
+    );
+
+    if (shouldPoll(response.current_job)) {
+      startPolling();
+    } else {
+      stopPolling();
+    }
+  } catch (error) {
+    appendLog(normalizeError(error, `加载书籍 #${normalizedBookId} 失败。`));
+  }
+}
+
+async function loadBooks(options = {}) {
+  try {
+    const response = await fetchJson(endpoint.listBooks(), {
+      method: "GET",
+    });
+    state.books = Array.isArray(response?.books) ? response.books : [];
+    state.statusCounts = response?.status_counts || null;
+    renderBookList({ elements, state });
+    if (!options.silent) {
+      appendLog(`已加载 ${state.books.length} 本书籍。`);
+    }
+    setApiConnectionStatus(true);
+  } catch (error) {
+    setApiConnectionStatus(false);
+    if (!options.silent) {
+      appendLog(normalizeError(error, "加载书籍列表失败。"));
+    }
+  }
+}
+
+async function loadReader(bookId, options = {}) {
+  const normalizedBookId = Number(bookId) || null;
+  if (!normalizedBookId) {
+    state.readerInfo = null;
+    state.readerChapters = [];
+    state.readerSegments = [];
+    state.selectedReaderChapterId = null;
+    state.selectedReaderSegmentId = null;
+    state.selectedReaderNotes = [];
+    renderReaderChapterOptions({ elements, state, chapters: [] });
+    renderReaderSegments({ elements, state });
+    renderSegmentNotesPanel({ elements, state });
+    return;
+  }
+
+  try {
+    const [info, chaptersResponse] = await Promise.all([
+      fetchJson(endpoint.readerInfo(normalizedBookId), { method: "GET" }),
+      fetchJson(endpoint.readerChapters(normalizedBookId), { method: "GET" }),
+    ]);
+
+    state.readerInfo = info || null;
+    state.readerChapters = Array.isArray(chaptersResponse?.chapters) ? chaptersResponse.chapters : [];
+    state.selectedReaderChapterId = pickReaderChapterId(state.readerChapters, state.selectedReaderChapterId);
+    renderReaderChapterOptions({ elements, state, chapters: state.readerChapters });
+
+    if (state.selectedReaderChapterId) {
+      await loadReaderSegments(normalizedBookId, state.selectedReaderChapterId, { silent: options.silent });
+    } else {
+      state.readerSegments = [];
+      state.selectedReaderSegmentId = null;
+      state.selectedReaderNotes = [];
+      renderReaderSegments({ elements, state });
+      renderSegmentNotesPanel({ elements, state });
+    }
+  } catch (error) {
+    state.readerInfo = null;
+    state.readerChapters = [];
+    state.readerSegments = [];
+    state.selectedReaderChapterId = null;
+    state.selectedReaderSegmentId = null;
+    state.selectedReaderNotes = [];
+    renderReaderChapterOptions({ elements, state, chapters: [] });
+    renderReaderSegments({ elements, state });
+    renderSegmentNotesPanel({ elements, state });
+    if (!options.silent) {
+      appendLog(normalizeError(error, "加载阅读器内容失败。"));
+    }
+  }
+}
+
+async function loadReaderSegments(bookId, chapterId, options = {}) {
+  const normalizedBookId = Number(bookId) || null;
+  const normalizedChapterId = Number(chapterId) || null;
+  if (!normalizedBookId || !normalizedChapterId) {
+    state.readerSegments = [];
+    state.selectedReaderSegmentId = null;
+    state.selectedReaderNotes = [];
+    renderReaderSegments({ elements, state });
+    renderSegmentNotesPanel({ elements, state });
+    return;
+  }
+
+  const mode = elements.readerMode?.value || state.selectedReaderMode || "bilingual";
+  state.selectedReaderMode = mode;
+
+  try {
+    const response = await fetchJson(
+      endpoint.readerSegments(normalizedBookId, normalizedChapterId, mode),
+      { method: "GET" }
+    );
+
+    state.readerSegments = Array.isArray(response?.segments) ? response.segments : [];
+    state.selectedReaderChapterId = Number(response?.chapterId ?? normalizedChapterId) || normalizedChapterId;
+    state.selectedReaderSegmentId = pickReaderSegmentId(state.readerSegments, state.selectedReaderSegmentId);
+    renderReaderSegments({ elements, state, response });
+
+    if (state.selectedReaderSegmentId) {
+      await loadSegmentNotes(state.selectedReaderSegmentId, { silent: true });
+    } else {
+      state.selectedReaderNotes = [];
+      renderSegmentNotesPanel({ elements, state });
+    }
+  } catch (error) {
+    state.readerSegments = [];
+    state.selectedReaderSegmentId = null;
+    state.selectedReaderNotes = [];
+    renderReaderSegments({ elements, state });
+    renderSegmentNotesPanel({ elements, state });
+    if (!options.silent) {
+      appendLog(normalizeError(error, "加载段落失败。"));
+    }
+  }
+}
+
+async function loadSegmentNotes(segmentId, options = {}) {
+  const normalizedSegmentId = Number(segmentId) || null;
+  if (!normalizedSegmentId) {
+    state.selectedReaderNotes = [];
+    renderSegmentNotesPanel({ elements, state });
+    return;
+  }
+
+  try {
+    const response = await fetchJson(endpoint.segmentNotes(normalizedSegmentId), {
+      method: "GET",
+    });
+    state.selectedReaderSegmentId = normalizedSegmentId;
+    state.selectedReaderNotes = Array.isArray(response) ? response : [];
+    renderSegmentNotesPanel({ elements, state });
+  } catch (error) {
+    state.selectedReaderNotes = [];
+    renderSegmentNotesPanel({ elements, state });
+    if (!options.silent) {
+      appendLog(normalizeError(error, "加载段落笔记失败。"));
+    }
+  }
+}
+
+async function loadProviderProfiles() {
+  try {
+    const response = await fetchJson(endpoint.listProviders(), {
+      method: "GET",
+    });
+    state.providerProfiles = Array.isArray(response?.providers) ? response.providers : [];
+    state.defaultProviderProfileName = String(
+      response?.default_profile_name
+      || state.providerProfiles[0]?.profile_name
+      || state.providerProfiles[0]?.name
+      || ""
+    ).trim() || null;
+    ensureSelectedProviderProfile();
+    renderProviderProfileSummary();
+    setApiConnectionStatus(true);
+    appendLog(
+      state.providerProfiles.length
+        ? `已加载 ${state.providerProfiles.length} 个翻译配置档，当前选择 ${describeSelectedProviderProfile()}。`
+        : "后端没有返回可用的翻译配置档。"
+    );
+  } catch (error) {
+    state.providerProfiles = FALLBACK_PROVIDER_PROFILES;
+    state.defaultProviderProfileName = FALLBACK_PROVIDER_PROFILES[0].profile_name;
+    ensureSelectedProviderProfile();
+    renderProviderProfileSummary();
+    setApiConnectionStatus(false);
+    appendLog(`${normalizeError(error, "加载翻译配置档失败。")} 已使用本地预览配置。`);
+  }
+}
+
+// ==========================================
+// RENDER ORCHESTRATION
+// ==========================================
+function render() {
+  const detail = state.currentBookDetail;
+  const book = detail?.book;
+  const job = detail?.current_job;
+
+  elements.currentBookLabel.textContent = book
+    ? `${displayBookTitle(book)} · #${book.id}`
+    : "未选择";
+
+  const bigBookCover = document.querySelector("#book-cover");
+  if (bigBookCover && book) {
+    bigBookCover.style.background = getBookCoverStyle(book);
+    const coverSpan = bigBookCover.querySelector("span");
+    if (coverSpan) {
+      coverSpan.textContent = bookCoverInitials(book);
+    }
+  }
+
+  renderTranslate({
+    elements,
+    state,
+    providerActions: {
+      ensureSelectedProviderProfile,
+      getSelectedProviderProfile,
+      profileIdentifier,
     },
   });
-  const contentType = response.headers.get("content-type") || "";
-  const payload = contentType.includes("application/json")
-    ? await response.json()
-    : null;
+  renderReader({ elements, state });
+  renderHome({ elements, state });
 
-  if (!response.ok) {
-    throw new Error(
-      payload?.message
-      || payload?.detail?.message
-      || payload?.detail
-      || `请求失败，状态码 ${response.status}。`
-    );
-  }
-
-  return payload;
+  elements.detailPanel.classList.toggle("is-empty", !book);
+  elements.readerPanel.classList.toggle("is-empty", !book);
+  renderRoute(elements, state);
 }
 
-function progressFromChapters(totals) {
-  if (!totals.total) {
-    return 0;
-  }
-  return totals.translated / totals.total;
-}
-
-function totalsFromJob(job, fallbackTotals) {
-  const total = Number(job?.total_segments);
-  const translated = Number(job?.translated_segments);
-  const failed = Number(job?.failed_segments);
-  return {
-    total: Number.isFinite(total) && total > 0 ? total : fallbackTotals.total,
-    translated: Number.isFinite(translated) && translated >= 0
-      ? translated
-      : fallbackTotals.translated,
-    failed: Number.isFinite(failed) && failed >= 0 ? failed : fallbackTotals.failed,
-  };
-}
-
-function estimateRemainingTime(job, totals, percentage) {
-  const explicitSeconds = Number(job?.estimated_remaining_seconds);
-  if (Number.isFinite(explicitSeconds) && explicitSeconds > 0) {
-    return formatDuration(explicitSeconds);
-  }
-  if (!totals.total || percentage <= 0 || percentage >= 100) {
-    return percentage >= 100 ? "0 分钟" : "计算中";
-  }
-
-  const remaining = Math.max(0, totals.total - totals.translated - totals.failed);
-  if (!remaining) {
-    return "0 分钟";
-  }
-
-  return formatDuration(Math.round(remaining * 2.2));
-}
-
-function formatDuration(totalSeconds) {
-  const minutes = Math.max(1, Math.round(totalSeconds / 60));
-  const hours = Math.floor(minutes / 60);
-  const restMinutes = minutes % 60;
-  if (!hours) {
-    return `${restMinutes} 分钟`;
-  }
-  if (!restMinutes) {
-    return `${hours} 小时`;
-  }
-  return `${hours} 小时 ${restMinutes} 分钟`;
-}
-
-function formatNumber(value) {
-  return new Intl.NumberFormat("zh-CN").format(Number(value) || 0);
-}
-
-function setBusy(button, isBusy, label) {
-  button.disabled = isBusy;
-  if (isBusy) {
-    button.dataset.originalLabel = button.textContent;
-    button.textContent = label;
+function applyRoute(hash) {
+  const route = normalizeRoute(hash);
+  syncRouteHash(route);
+  if (state.activePage === route) {
+    renderRoute(elements, state);
     return;
   }
-  button.textContent = button.dataset.originalLabel || label;
+  state.activePage = route;
+  renderRoute(elements, state);
+  render();
 }
 
-function updateUrlBookId(bookId) {
-  const url = new URL(window.location.href);
-  url.searchParams.set("bookId", String(bookId));
-  window.history.replaceState({}, "", url);
+function navigateTo(route) {
+  const normalized = normalizeRoute(`#/${route}`);
+  window.location.hash = `#/${normalized}`;
 }
 
-function normalizeError(error, fallback) {
-  if (!error) {
-    return fallback;
+function ensureRouteHash() {
+  const route = normalizeRoute(window.location.hash);
+  state.activePage = route;
+  syncRouteHash(route);
+  renderRoute(elements, state);
+}
+
+// ==========================================
+// PROVIDER PROFILE STATE
+// ==========================================
+function onProviderProfileChange(event) {
+  state.selectedProviderProfileName = String(event.target.value || "").trim() || null;
+  if (state.selectedProviderProfileName) {
+    window.localStorage.setItem(PROVIDER_PROFILE_STORAGE_KEY, state.selectedProviderProfileName);
+  } else {
+    window.localStorage.removeItem(PROVIDER_PROFILE_STORAGE_KEY);
   }
-  if (error instanceof Error && error.message) {
-    return error.message;
-  }
-  return fallback;
+  renderProviderProfileSummary();
+  appendLog(`翻译配置档已切换为 ${describeSelectedProviderProfile()}。`);
 }
 
 function buildTranslationRequestPayload() {
@@ -1537,204 +834,77 @@ function profileIdentifier(profile) {
   return String(profile?.profile_name || profile?.name || "").trim();
 }
 
-function sourceLanguageLabel(value) {
-  const normalized = String(value || "").trim();
-  if (!normalized) {
-    return "-";
-  }
-  if (normalized.toLowerCase() === "en") {
-    return "英文 (en)";
-  }
-  if (normalized.toLowerCase() === "zh") {
-    return "中文 (zh)";
-  }
-  return normalized;
+function renderProviderProfileSummary() {
+  renderTranslate({
+    elements,
+    state,
+    providerActions: {
+      ensureSelectedProviderProfile,
+      getSelectedProviderProfile,
+      profileIdentifier,
+    },
+  });
 }
 
-function statusBadgeClass(status) {
-  switch ((status || "").toLowerCase()) {
-    case "translated":
-    case "completed":
-    case "ready":
-      return "status-success";
-    case "translating":
-    case "running":
-    case "pending":
-    case "queued":
-      return "status-running";
-    case "failed":
-    case "error":
-      return "status-failed";
-    case "skipped":
-      return "status-accent";
-    default:
-      return "status-neutral";
+// ==========================================
+// POLLING
+// ==========================================
+function startPolling() {
+  if (!state.currentBookId) {
+    return;
   }
+  stopPolling();
+  state.pollTimer = window.setInterval(() => {
+    void loadBook(state.currentBookId, { silent: true });
+  }, POLL_INTERVAL_MS);
+  elements.pollingLabel.textContent = `每 ${Math.round(POLL_INTERVAL_MS / 1000)} 秒`;
 }
 
-function translateStatus(status) {
-  switch ((status || "").toLowerCase()) {
-    case "translated":
-    case "completed":
-    case "ready":
-      return "已翻译";
-    case "translating":
-    case "running":
-      return "翻译中";
-    case "failed":
-    case "error":
-      return "失败";
-    case "pending":
-    case "queued":
-      return "待翻译";
-    case "canceled":
-      return "已取消";
-    case "skipped":
-      return "已跳过";
-    case "idle":
-      return "空闲";
-    case "unknown":
-      return "未知";
-    default:
-      return status || "-";
+function stopPolling() {
+  if (state.pollTimer) {
+    window.clearInterval(state.pollTimer);
+    state.pollTimer = null;
   }
+  elements.pollingLabel.textContent = "空闲";
 }
 
-function bookStatusClass(status) {
-  switch ((status || "").toLowerCase()) {
-    case "running":
-    case "pending":
-      return "running";
-    case "completed":
-      return "done";
-    case "failed":
-      return "failed";
-    default:
-      return "running";
-  }
+function shouldPoll(job) {
+  return Boolean(job && ["pending", "running"].includes(job.status));
 }
 
-function bookCoverInitials(book) {
-  const title = displayBookTitle(book) || book?.filename || "FB";
-  return String(title).trim().slice(0, 2).toUpperCase();
+// ==========================================
+// SMALL DOM SIDE EFFECTS
+// ==========================================
+function setBusy(button, isBusy, label) {
+  button.disabled = isBusy;
+  if (isBusy) {
+    button.dataset.originalLabel = button.textContent;
+    button.textContent = label;
+    return;
+  }
+  button.textContent = button.dataset.originalLabel || label;
+}
+
+function updateUrlBookId(bookId) {
+  const url = new URL(window.location.href);
+  url.searchParams.set("bookId", String(bookId));
+  window.history.replaceState({}, "", url);
 }
 
 function setApiConnectionStatus(isConnected) {
   elements.apiConnectionLabel.innerHTML = `<span class="status-dot"></span>${isConnected ? "已连接" : "未连接"}`;
 }
 
-function translateArtifactKind(kind) {
-  switch ((kind || "").toLowerCase()) {
-    case "zh":
-      return "中文 EPUB";
-    case "bilingual":
-      return "中英双语 EPUB";
-    case "consistency_report":
-      return "一致性报告";
-    default:
-      return kind || "-";
-  }
-}
-
-function normalizedTranslatedTitle(book) {
-  return String(book?.translated_title || "").trim();
-}
-
-function displayBookTitle(book) {
-  const normalizedStatus = String(book?.title_translation_status || "").trim().toLowerCase();
-  return normalizedStatus === "completed"
-    ? normalizedTranslatedTitle(book) || String(book?.title || "").trim()
-    : String(book?.title || "").trim();
-}
-
-function renderTranslatedTitle(book) {
-  const normalizedStatus = String(book?.title_translation_status || "").trim().toLowerCase();
-  const translatedTitle = normalizedTranslatedTitle(book);
-  if (normalizedStatus === "completed") {
-    return translatedTitle || "未生成";
-  }
-  if (normalizedStatus === "failed") {
-    return "未生成";
-  }
-  return "待生成";
-}
-
-function translateTitleTranslationStatus(status) {
-  const normalizedStatus = String(status || "").trim().toLowerCase();
-  if (normalizedStatus === "completed") {
-    return "已翻译";
-  }
-  if (normalizedStatus === "failed") {
-    return "生成失败";
-  }
-  return "未翻译";
-}
-
-function extractFilename(contentDisposition) {
-  if (!contentDisposition) {
-    return null;
-  }
-  const match = /filename\*?=(?:UTF-8''|")?([^\";]+)/i.exec(contentDisposition);
-  return match ? decodeURIComponent(match[1].replace(/"/g, "")) : null;
-}
-
-function clampPercentage(value) {
-  return Math.max(0, Math.min(100, Number.isFinite(value) ? value : 0));
-}
-
-function formatBytes(value) {
-  if (!Number.isFinite(value) || value <= 0) {
-    return "0 B";
-  }
-  const units = ["B", "KB", "MB", "GB"];
-  let size = value;
-  let index = 0;
-  while (size >= 1024 && index < units.length - 1) {
-    size /= 1024;
-    index += 1;
-  }
-  return `${size.toFixed(size >= 10 || index === 0 ? 0 : 1)} ${units[index]}`;
-}
-
-function formatDateTime(value) {
-  if (!value) {
-    return "-";
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-  return date.toLocaleString("zh-CN", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
+function appendLog(message) {
+  const timestamp = new Date().toLocaleTimeString("zh-CN", {
     hour: "2-digit",
     minute: "2-digit",
+    second: "2-digit",
   });
-}
 
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
+  state.activity.unshift({
+    time: timestamp,
+    message,
+  });
+  renderLog({ elements, activity: state.activity });
 }
-
-function getBookCoverStyle(book) {
-  const id = Number(book?.id) || 0;
-  const gradients = [
-    "linear-gradient(135deg, #1e3c72, #2a5298)",
-    "linear-gradient(135deg, #3a1c71, #d76d77, #ffaf7b)",
-    "linear-gradient(135deg, #0f2027, #203a43, #2c5364)",
-    "linear-gradient(135deg, #11998e, #38ef7d)",
-    "linear-gradient(135deg, #fc466b, #3f5efb)",
-    "linear-gradient(135deg, #7f00ff, #e100ff)",
-    "linear-gradient(135deg, #ff007f, #ff00ff)",
-    "linear-gradient(135deg, #00c6ff, #0072ff)",
-    "linear-gradient(135deg, #f12711, #f5af19)"
-  ];
-  return gradients[id % gradients.length];
-}
-
