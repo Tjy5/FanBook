@@ -154,32 +154,9 @@
                   <p id="translation-provider-summary" class="profile-summary">正在加载可用配置档。</p>
                   <button id="translate-button" class="button button-primary full" type="submit">开始翻译</button>
                   <button id="resume-button" class="button button-secondary full" type="button">恢复任务</button>
-                  <button id="stop-polling-button" class="button button-danger full" type="button">取消当前任务</button>
+                  <button id="stop-polling-button" class="button button-danger full" type="button">取消任务</button>
                 </form>
                 <p class="auto-refresh"><span class="status-dot"></span><span id="polling-label">空闲</span></p>
-              </section>
-
-              <section class="tool-panel">
-                <h2>导出</h2>
-                <div id="export-list" class="export-list">
-                  <article><strong>中文 EPUB</strong><span>等待生成</span></article>
-                  <article><strong>中英双语 EPUB</strong><span>等待生成</span></article>
-                  <article><strong>一致性报告</strong><span>等待生成</span></article>
-                </div>
-                <div class="export-actions">
-                  <button id="download-zh" class="button button-secondary full" type="button">导出中文 EPUB</button>
-                  <button id="download-bilingual" class="button button-secondary full" type="button">导出中英双语 EPUB</button>
-                  <button id="download-consistency" class="button button-secondary full" type="button">导出一致性报告</button>
-                </div>
-              </section>
-
-              <section class="tool-panel log-panel">
-                <div class="section-heading compact-heading">
-                  <div>
-                    <h2>活动日志</h2>
-                  </div>
-                </div>
-                <div id="message-log" class="message-log" aria-live="polite"></div>
               </section>
             </aside>
 
@@ -249,6 +226,20 @@
                   <p id="job-progress-label" class="estimate-text">当前没有活动任务</p>
                 </section>
 
+                <section class="exports-panel surface-panel">
+                  <h2>导出</h2>
+                  <div id="export-list" class="export-list">
+                    <article><strong>中文 EPUB</strong><span>等待生成</span></article>
+                    <article><strong>中英双语 EPUB</strong><span>等待生成</span></article>
+                    <article><strong>一致性报告</strong><span>等待生成</span></article>
+                  </div>
+                  <div class="export-actions">
+                    <button id="download-zh" class="button button-secondary full" type="button">导出中文 EPUB</button>
+                    <button id="download-bilingual" class="button button-secondary full" type="button">导出中英双语 EPUB</button>
+                    <button id="download-consistency" class="button button-secondary full" type="button">导出一致性报告</button>
+                  </div>
+                </section>
+
                 <section class="chapters-panel surface-panel" aria-labelledby="chapters-title">
                   <div class="section-heading">
                     <div>
@@ -258,6 +249,15 @@
                   <div id="chapters-list" class="chapter-table">
                     <div class="empty-state">载入书籍后，这里会显示章节进度。</div>
                   </div>
+                </section>
+
+                <section class="log-workspace-panel surface-panel">
+                  <div class="section-heading compact-heading">
+                    <div>
+                      <h2>活动日志</h2>
+                    </div>
+                  </div>
+                  <div id="message-log" class="message-log" aria-live="polite"></div>
                 </section>
               </div>
             </section>
