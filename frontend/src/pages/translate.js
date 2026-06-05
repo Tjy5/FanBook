@@ -44,53 +44,49 @@ export function renderTranslateEmptyState({ elements, state }) {
     .sort((a, b) => new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0))
     .slice(0, 3);
 
-  let recentBooksHtml = "";
-  if (recentBooks.length > 0) {
-    recentBooksHtml = `
-      <div class="recent-uploads-box" style="margin-top: 1.5rem; text-align: left; width: 100%; max-width: 450px;">
-        <h3 style="font-size: 13px; color: var(--text-primary); margin-bottom: 0.75rem; font-weight: 700; border-bottom: 1px solid var(--line); padding-bottom: 4px;">最近处理的书籍</h3>
-        <div style="display: grid; gap: 8px;">
-          ${recentBooks.map(b => {
-            const title = displayBookTitle(b) || "未命名书籍";
-            const progress = b.status === "completed" ? "100%" : (b.progress ? `${Math.round(b.progress * 100)}%` : "进行中");
-            return `
-              <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px;">
-                <div style="display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1;">
-                  <span style="font-weight: 700; font-size:12px; color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px;">${escapeHtml(title)}</span>
-                  <span style="font-size: 10px; color: var(--muted); flex-shrink: 0;">(${escapeHtml(progress)})</span>
-                </div>
-                <button class="button button-secondary compact" type="button" data-load-recent-book-id="${escapeHtml(b.id)}" style="min-height: 24px; padding: 0 8px; font-size: 11px; flex-shrink: 0;">
-                  ${b.status === "completed" ? "阅读" : "管理"}
-                </button>
-              </div>
-            `;
-          }).join("")}
+  const recentBooksHtml = recentBooks.length > 0
+    ? `
+      <div class="recent-books-panel">
+        <h3>最近书籍</h3>
+        <div class="recent-books-list">
+          ${recentBooks.map((book) => renderRecentBookShortcut(book)).join("")}
         </div>
       </div>
-    `;
-  }
+    `
+    : "";
 
   if (elements.translateEmptyState) {
     elements.translateEmptyState.innerHTML = `
-      <div class="empty-dashboard-sim" style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 400px; padding: 20px; text-align: center; color: var(--muted);">
-        <h2 style="font-size: 20px; color: var(--text); margin-bottom: 12px;">开始翻译你的第一本书</h2>
-        <p style="width: 28em; margin: 0 auto 20px; max-width: 100%; line-height: 1.6;">
-          可以从左侧上传新的 EPUB 书籍并开始翻译。如需继续之前的工作，可在下方快捷加载最近书籍或返回首页选择。
-        </p>
-
-        <div style="background: var(--surface-soft); border: 1px solid var(--line); border-radius: 8px; padding: 16px; width: 100%; max-width: 450px; text-align: left; margin-bottom: 15px;">
-          <h3 style="font-size: 12px; text-transform: uppercase; color: var(--muted); margin-bottom: 10px; font-weight: 700;">3 步快速指南</h3>
-          <ol style="margin-left: 1.25rem; font-size: 12px; display: grid; gap: 6px; color: var(--text-primary);">
-            <li>在左侧面板<strong>上传并解析</strong> EPUB 电子书文件。</li>
-            <li>选择合适的<strong>翻译配置档</strong>（AI Provider与模型）。</li>
-            <li>点击左侧“<strong>开始翻译</strong>”按钮，后台异步队列即可启动。</li>
-          </ol>
-        </div>
-
-        ${recentBooksHtml}
+      <div class="empty-visual" aria-hidden="true">
+        <span></span>
+        <span></span>
+        <span></span>
       </div>
+      <h2>开始翻译</h2>
+      <p>上传 EPUB 或载入最近书籍后，翻译进度、章节状态和导出结果会集中显示在这里。</p>
+        ${recentBooksHtml}
     `;
   }
+}
+
+function renderRecentBookShortcut(book) {
+  const title = displayBookTitle(book) || "未命名书籍";
+  const progress = book.status === "completed"
+    ? "100%"
+    : book.progress
+      ? `${Math.round(Number(book.progress) * 100)}%`
+      : translateStatus(book.status || "pending");
+  return `
+    <article class="recent-book-card">
+      <div>
+        <strong>${escapeHtml(title)}</strong>
+        <span>${escapeHtml(progress)}</span>
+      </div>
+      <button class="button button-secondary compact" type="button" data-load-recent-book-id="${escapeHtml(book.id)}">
+        载入
+      </button>
+    </article>
+  `;
 }
 
 export function renderBookMetadata({ elements, book, job, options = {} }) {
