@@ -5,7 +5,15 @@ import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { contentTypeFor, createFrontendServer, isProxyRequest, resolveStaticFile } from "../dev-server.mjs";
-import { createMockApiServer, MOCK_PASSWORD, MOCK_USERNAME } from "../mock-api.mjs";
+import {
+  createMockApiServer,
+  MOCK_ADMIN_PASSWORD,
+  MOCK_ADMIN_USERNAME,
+  MOCK_PASSWORD,
+  MOCK_MEMBER_PASSWORD,
+  MOCK_MEMBER_USERNAME,
+  MOCK_USERNAME,
+} from "../mock-api.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const frontendRoot = join(__dirname, "..");
@@ -114,19 +122,37 @@ try {
 
   const rejected = await requestJson(mockApiPort, "/api/auth/login", {
     method: "POST",
-    body: { username: MOCK_USERNAME, password: "wrong" },
+    body: { username: MOCK_MEMBER_USERNAME, password: "wrong" },
   });
   assert.equal(rejected.statusCode, 401);
 
   const login = await requestJson(mockApiPort, "/api/auth/login", {
     method: "POST",
-    body: { username: MOCK_USERNAME, password: MOCK_PASSWORD },
+    body: { username: MOCK_MEMBER_USERNAME, password: MOCK_MEMBER_PASSWORD },
   });
   assert.equal(login.statusCode, 200);
-  assert.equal(login.body.username, MOCK_USERNAME);
+  assert.equal(login.body.username, MOCK_MEMBER_USERNAME);
   assert.deepEqual(login.body.roles, ["MEMBER"]);
+  assert.equal(MOCK_USERNAME, MOCK_MEMBER_USERNAME);
+  assert.equal(MOCK_PASSWORD, MOCK_MEMBER_PASSWORD);
 
   const cookie = login.headers["set-cookie"][0].split(";")[0];
+  const memberMe = await requestJson(mockApiPort, "/api/auth/me", { cookie });
+  assert.equal(memberMe.statusCode, 200);
+  assert.equal(memberMe.body.username, MOCK_MEMBER_USERNAME);
+  assert.deepEqual(memberMe.body.roles, ["MEMBER"]);
+
+  const memberAdminRoot = await requestJson(mockApiPort, "/api/admin", { cookie });
+  assert.equal(memberAdminRoot.statusCode, 403);
+  const memberAdminUsers = await requestJson(mockApiPort, "/api/admin/users", { cookie });
+  assert.equal(memberAdminUsers.statusCode, 403);
+  const memberRoleUpdate = await requestJson(mockApiPort, "/api/admin/users/1/roles", {
+    method: "PATCH",
+    body: { roles: ["ADMIN"] },
+    cookie,
+  });
+  assert.equal(memberRoleUpdate.statusCode, 403);
+
   const books = await requestJson(mockApiPort, "/api/books", { cookie });
   assert.equal(books.statusCode, 200);
   assert.equal(books.body.status_counts.total, 0);
@@ -135,6 +161,37 @@ try {
   const notes = await requestJson(mockApiPort, "/api/segments/1001/notes", { cookie });
   assert.equal(notes.statusCode, 200);
   assert.equal(notes.body.length, 2);
+
+  const adminLogin = await requestJson(mockApiPort, "/api/auth/login", {
+    method: "POST",
+    body: { username: MOCK_ADMIN_USERNAME, password: MOCK_ADMIN_PASSWORD },
+  });
+  assert.equal(adminLogin.statusCode, 200);
+  assert.equal(adminLogin.body.username, MOCK_ADMIN_USERNAME);
+  assert.deepEqual(adminLogin.body.roles, ["ADMIN"]);
+
+  const adminCookie = adminLogin.headers["set-cookie"][0].split(";")[0];
+  const adminMe = await requestJson(mockApiPort, "/api/auth/me", { cookie: adminCookie });
+  assert.equal(adminMe.statusCode, 200);
+  assert.equal(adminMe.body.username, MOCK_ADMIN_USERNAME);
+  assert.deepEqual(adminMe.body.roles, ["ADMIN"]);
+
+  const adminUsers = await requestJson(mockApiPort, "/api/admin/users", { cookie: adminCookie });
+  assert.equal(adminUsers.statusCode, 200);
+  assert.deepEqual(
+    adminUsers.body.users.map((user) => [user.username, user.roles[0]]),
+    [
+      [MOCK_MEMBER_USERNAME, "MEMBER"],
+      [MOCK_ADMIN_USERNAME, "ADMIN"],
+    ]
+  );
+  const adminRoleUpdate = await requestJson(mockApiPort, "/api/admin/users/1/roles", {
+    method: "PATCH",
+    body: { roles: ["MEMBER"] },
+    cookie: adminCookie,
+  });
+  assert.equal(adminRoleUpdate.statusCode, 200);
+  assert.equal(adminRoleUpdate.body.username, MOCK_MEMBER_USERNAME);
 } finally {
   await close(mockApi);
 }

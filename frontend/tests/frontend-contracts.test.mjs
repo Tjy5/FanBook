@@ -19,6 +19,9 @@ for (const fragment of [
   "const POLL_INTERVAL_MS = 3000",
   "const DEMO_BOOK_STORAGE_VALUE = \"demo\"",
   "type LoadBookOptions = { silent?: boolean; syncUrl?: boolean }",
+  'type LoginMode = "user" | "admin"',
+  "const LOGIN_VIEW_COPY",
+  'const loginMode: LoginMode = route === "admin-users" ? "admin" : "user"',
   "cloneDemoBookDetail",
   "bookIdFromInput",
   'localStorage.getItem(PROVIDER_PROFILE_STORAGE_KEY)',
@@ -46,6 +49,20 @@ assert.ok(
     app.includes("updateBookIdSearch(detail.book.id);") &&
     app.includes("updateBookIdSearch(DEMO_BOOK_ID);"),
   "Expected explicit book loads, including demo, to keep writing shareable bookId URLs"
+);
+
+assert.ok(
+  app.includes('if (loginMode === "admin" && !hasRole(user, "ADMIN"))') &&
+    app.includes('window.location.hash = "#/library";') &&
+    app.includes("不是管理员，已切回我的书架。"),
+  "Expected MEMBER users logging in through admin mode to be redirected to the library"
+);
+
+assert.ok(
+  app.includes('window.location.hash = "#/admin-users";') &&
+    app.includes("已登录为管理员") &&
+    app.includes("auth-panel-${loginMode}"),
+  "Expected ADMIN login mode to route to admin user management with distinct UI fragments"
 );
 
 for (const fragment of [

@@ -216,6 +216,7 @@ const DEMO_SEGMENT_NOTES: Record<number, SegmentNote[]> = {
 };
 
 type Route = "library" | "translate" | "read" | "settings" | "admin-users";
+type LoginMode = "user" | "admin";
 type Filter = "all" | "running" | "completed" | "failed";
 type ReaderMode = "bilingual" | "original" | "translated";
 type ReaderPageTone = "source" | "translated";
@@ -243,6 +244,32 @@ interface ActivityEntry {
   time: string;
   message: string;
 }
+
+const LOGIN_VIEW_COPY: Record<LoginMode, {
+  title: string;
+  subtitle: string;
+  modeLabel: string;
+  accountHint: string;
+  buttonLabel: string;
+  summary: string;
+}> = {
+  user: {
+    title: "Fanbook",
+    subtitle: "AI book translation reader",
+    modeLabel: "普通用户入口",
+    accountHint: "测试账号 1 / 1",
+    buttonLabel: "进入我的书架",
+    summary: "登录后进入我的书架，阅读演示书或翻译自己的 EPUB。",
+  },
+  admin: {
+    title: "Fanbook Admin",
+    subtitle: "User management login",
+    modeLabel: "管理员入口",
+    accountHint: "测试账号 2 / 2",
+    buttonLabel: "进入用户管理",
+    summary: "只有 ADMIN 角色可以停留在用户管理页面。",
+  },
+};
 
 function App() {
   const api = useMemo(() => new ApiClient(API_BASE), []);
@@ -281,6 +308,7 @@ function App() {
 
   const isAdmin = hasRole(currentUser, "ADMIN");
   const isMemberLike = hasAnyRole(currentUser, ["ADMIN", "MEMBER"]);
+  const loginMode: LoginMode = route === "admin-users" ? "admin" : "user";
   const selectedProviderProfile = useMemo(
     () => pickProvider(providerProfiles, selectedProviderProfileName),
     [providerProfiles, selectedProviderProfileName]
@@ -378,6 +406,18 @@ function App() {
       const user = await api.login({ username: loginUsername.trim(), password: loginPassword });
       setCurrentUser(user);
       setLoginPassword("");
+      if (loginMode === "admin" && !hasRole(user, "ADMIN")) {
+        window.location.hash = "#/library";
+        setRoute("library");
+        appendLog(`账号 ${user.username} 不是管理员，已切回我的书架。`);
+        return;
+      }
+      if (loginMode === "admin") {
+        window.location.hash = "#/admin-users";
+        setRoute("admin-users");
+        appendLog(`已登录为管理员 ${user.username}。`);
+        return;
+      }
       appendLog(`已登录为 ${user.username}。`);
     } catch (error) {
       appendLog(normalizeError(error, "登录失败。"));
@@ -925,15 +965,21 @@ function App() {
   }
 
   if (!currentUser) {
+    const loginView = LOGIN_VIEW_COPY[loginMode];
+    const LoginIcon = loginMode === "admin" ? Shield : BookOpen;
     return (
-      <div className="auth-shell">
-        <form className="auth-panel" onSubmit={login}>
+      <div className={`auth-shell auth-shell-${loginMode}`}>
+        <form className={`auth-panel auth-panel-${loginMode}`} onSubmit={login}>
           <div className="brand auth-brand">
-            <span className="brand-mark" aria-hidden="true"><BookOpen size={22} /></span>
+            <span className="brand-mark" aria-hidden="true"><LoginIcon size={22} /></span>
             <span>
-              <strong>Fanbook</strong>
-              <small>AI book translation reader</small>
+              <strong>{loginView.title}</strong>
+              <small>{loginView.subtitle}</small>
             </span>
+          </div>
+          <div className="auth-mode-banner">
+            <strong>{loginView.modeLabel}</strong>
+            <span>{loginView.accountHint}</span>
           </div>
           <label className="field">
             <span>用户名</span>
@@ -944,9 +990,9 @@ function App() {
             <input value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} type="password" autoComplete="current-password" required />
           </label>
           <button className="button button-primary full" type="submit" disabled={busyAction === "login"}>
-            {busyAction === "login" ? "登录中..." : "登录"}
+            {busyAction === "login" ? "登录中..." : loginView.buttonLabel}
           </button>
-          <p className="profile-summary">登录后进入我的书架，阅读演示书或翻译自己的 EPUB。</p>
+          <p className="profile-summary">{loginView.summary}</p>
           <ActivityLog activity={activity} />
         </form>
       </div>

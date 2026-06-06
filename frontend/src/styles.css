@@ -2428,6 +2428,13 @@ select:focus-visible,
     var(--bg);
 }
 
+.auth-shell-admin {
+  background:
+    linear-gradient(120deg, rgba(31, 36, 48, 0.26), transparent 42%),
+    linear-gradient(180deg, rgba(23, 97, 93, 0.14), transparent 54%),
+    var(--bg-deep);
+}
+
 .auth-panel {
   width: min(100%, 430px);
   display: grid;
@@ -2439,12 +2446,63 @@ select:focus-visible,
   box-shadow: var(--shadow);
 }
 
+.auth-panel-admin {
+  border-color: rgba(31, 36, 48, 0.42);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(237, 243, 239, 0.92)),
+    var(--surface);
+  box-shadow: 0 28px 68px rgba(21, 19, 27, 0.24);
+}
+
 .auth-brand {
   color: var(--ink);
 }
 
 .auth-brand small {
   color: var(--muted);
+}
+
+.auth-panel-admin .brand-mark {
+  color: #fbfbf7;
+  background:
+    linear-gradient(135deg, var(--sidebar-strong), var(--reader-dark));
+  border-color: rgba(31, 36, 48, 0.4);
+}
+
+.auth-mode-banner {
+  min-width: 0;
+  min-height: 48px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  color: var(--accent-dark);
+  background: var(--accent-quiet);
+  border: 1px solid var(--accent-soft);
+  border-radius: var(--radius-sm);
+}
+
+.auth-mode-banner strong,
+.auth-mode-banner span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.auth-mode-banner strong {
+  font-size: 13px;
+}
+
+.auth-mode-banner span {
+  color: var(--muted-strong);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.auth-panel-admin .auth-mode-banner {
+  color: var(--reader-dark);
+  background: var(--reader-soft);
+  border-color: rgba(23, 97, 93, 0.28);
 }
 
 .auth-brand-lockup {
@@ -2638,6 +2696,11 @@ select:focus-visible,
 
   .page-nav a strong {
     font-size: 12px;
+  }
+
+  .auth-mode-banner {
+    grid-template-columns: 1fr;
+    align-items: start;
   }
 
   .topbar {

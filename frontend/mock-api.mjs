@@ -1,12 +1,32 @@
 import http from "node:http";
 import { pathToFileURL } from "node:url";
 
-export const MOCK_USERNAME = "1";
-export const MOCK_PASSWORD = "1";
+export const MOCK_MEMBER_USERNAME = "1";
+export const MOCK_MEMBER_PASSWORD = "1";
+export const MOCK_ADMIN_USERNAME = "2";
+export const MOCK_ADMIN_PASSWORD = "2";
+export const MOCK_USERNAME = MOCK_MEMBER_USERNAME;
+export const MOCK_PASSWORD = MOCK_MEMBER_PASSWORD;
 
 const DEFAULT_PORT = 8080;
-const SESSION_COOKIE = "fanbook_mock=1";
+const SESSION_COOKIE_NAME = "fanbook_mock";
 const NOW = "2026-06-06T09:30:00Z";
+const mockAccounts = [
+  {
+    id: 1,
+    username: MOCK_MEMBER_USERNAME,
+    password: MOCK_MEMBER_PASSWORD,
+    email: "reader@example.test",
+    roles: ["MEMBER"],
+  },
+  {
+    id: 2,
+    username: MOCK_ADMIN_USERNAME,
+    password: MOCK_ADMIN_PASSWORD,
+    email: "admin@example.test",
+    roles: ["ADMIN"],
+  },
+];
 
 const books = [];
 
@@ -96,17 +116,15 @@ const providers = {
 };
 
 const users = {
-  users: [
-    {
-      id: 1,
-      username: MOCK_USERNAME,
-      email: "reader@example.test",
-      enabled: true,
-      roles: ["MEMBER"],
-      created_at: NOW,
-      updated_at: NOW,
-    },
-  ],
+  users: mockAccounts.map((account) => ({
+    id: account.id,
+    username: account.username,
+    email: account.email,
+    enabled: true,
+    roles: account.roles,
+    created_at: NOW,
+    updated_at: NOW,
+  })),
 };
 
 export function createMockApiServer() {
@@ -121,39 +139,42 @@ export function createMockApiServer() {
 
     if (path === "/auth/login" && request.method === "POST") {
       const payload = await readJson(request);
-      if (payload.username === MOCK_USERNAME && payload.password === MOCK_PASSWORD) {
-        sendJson(response, 200, currentUserPayload(), { "Set-Cookie": `${SESSION_COOKIE}; Path=/; SameSite=Lax` });
+      const account = findMockAccount(payload.username, payload.password);
+      if (account) {
+        sendJson(response, 200, currentUserPayload(account), { "Set-Cookie": sessionCookieFor(account) });
         return;
       }
-      sendJson(response, 401, { message: "Mock login failed. Use username 1 and password 1." });
+      sendJson(response, 401, { message: "Mock login failed. Use user 1 / 1 or admin 2 / 2." });
       return;
     }
 
     if (path === "/auth/logout" && request.method === "POST") {
-      response.writeHead(204, { "Set-Cookie": "fanbook_mock=; Path=/; Max-Age=0" });
+      response.writeHead(204, { "Set-Cookie": `${SESSION_COOKIE_NAME}=; Path=/; Max-Age=0` });
       response.end();
       return;
     }
 
     if (path === "/auth/me") {
-      if (hasMockSession(request)) {
-        sendJson(response, 200, currentUserPayload());
+      const account = accountFromRequest(request);
+      if (account) {
+        sendJson(response, 200, currentUserPayload(account));
         return;
       }
       sendJson(response, 401, { message: "Authentication is required." });
       return;
     }
 
-    if (!hasMockSession(request)) {
+    const account = accountFromRequest(request);
+    if (!account) {
       sendJson(response, 401, { message: "Authentication is required." });
       return;
     }
 
-    routeAuthenticatedRequest(request, response, path);
+    routeAuthenticatedRequest(request, response, path, account);
   });
 }
 
-function routeAuthenticatedRequest(request, response, path) {
+function routeAuthenticatedRequest(request, response, path, account) {
   if (path === "/books") {
     sendJson(response, 200, { books, status_counts: { total: 0, running: 0, completed: 0, failed: 0 } });
     return;
@@ -178,8 +199,18 @@ function routeAuthenticatedRequest(request, response, path) {
     sendJson(response, 200, notes);
     return;
   }
+  if (isAdminPath(path) && !account.roles.includes("ADMIN")) {
+    sendJson(response, 403, { message: "Admin role is required." });
+    return;
+  }
   if (path === "/admin/users") {
     sendJson(response, 200, users);
+    return;
+  }
+  const roleUpdateMatch = /^\/admin\/users\/(\d+)\/roles$/.exec(path);
+  if (roleUpdateMatch && request.method === "PATCH") {
+    const userId = Number(roleUpdateMatch[1]);
+    sendJson(response, 200, users.users.find((user) => user.id === userId) || users.users[0]);
     return;
   }
   if (/\/exports\//.test(path) || /\/reports\//.test(path) || /\/notes\/export/.test(path)) {
@@ -198,19 +229,36 @@ function csrfPayload() {
   };
 }
 
-function currentUserPayload() {
+function currentUserPayload(account) {
   return {
-    id: 1,
-    username: MOCK_USERNAME,
-    email: "reader@example.test",
-    roles: ["MEMBER"],
+    id: account.id,
+    username: account.username,
+    email: account.email,
+    roles: account.roles,
     csrf_token: "mock-token",
     csrf_header_name: "X-CSRF-TOKEN",
   };
 }
 
-function hasMockSession(request) {
-  return (request.headers.cookie ?? "").split(";").some((cookie) => cookie.trim() === SESSION_COOKIE);
+function findMockAccount(username, password) {
+  return mockAccounts.find((account) => account.username === String(username ?? "") && account.password === String(password ?? ""));
+}
+
+function accountFromRequest(request) {
+  const sessionValue = (request.headers.cookie ?? "")
+    .split(";")
+    .map((cookie) => cookie.trim())
+    .find((cookie) => cookie.startsWith(`${SESSION_COOKIE_NAME}=`))
+    ?.slice(SESSION_COOKIE_NAME.length + 1);
+  return mockAccounts.find((account) => account.username === decodeURIComponent(sessionValue ?? ""));
+}
+
+function sessionCookieFor(account) {
+  return `${SESSION_COOKIE_NAME}=${encodeURIComponent(account.username)}; Path=/; SameSite=Lax`;
+}
+
+function isAdminPath(path) {
+  return path === "/admin" || path.startsWith("/admin/");
 }
 
 function sendJson(response, status, payload, headers = {}) {
@@ -249,6 +297,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const server = createMockApiServer();
   server.listen(options.port, "127.0.0.1", () => {
     console.log(`Fanbook mock API: http://127.0.0.1:${options.port}`);
-    console.log(`Mock login: ${MOCK_USERNAME} / ${MOCK_PASSWORD}`);
+    console.log(`Mock user login: ${MOCK_MEMBER_USERNAME} / ${MOCK_MEMBER_PASSWORD}`);
+    console.log(`Mock admin login: ${MOCK_ADMIN_USERNAME} / ${MOCK_ADMIN_PASSWORD}`);
   });
 }
