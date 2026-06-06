@@ -32,7 +32,7 @@ public class BookController {
             @RequestParam(value = "title", required = false) String title
     ) throws IOException {
         validateUpload(file);
-        return bookApplicationService.upload(file.getOriginalFilename(), file.getBytes(), sourceLanguage, title);
+        return bookApplicationService.uploadForCurrentUser(file.getOriginalFilename(), file.getBytes(), sourceLanguage, title);
     }
 
     @GetMapping("/api/books")

@@ -33,6 +33,9 @@ public class BookEntity {
     @Column(name = "source_object_key", nullable = false, columnDefinition = "LONGTEXT")
     private String sourceObjectKey;
 
+    @Column(name = "owner_user_id")
+    private Long ownerUserId;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 32)
     private BookStatus status;
@@ -47,10 +50,15 @@ public class BookEntity {
     }
 
     public BookEntity(String filename, String title, String sourceLanguage, String sourceObjectKey, BookStatus status) {
+        this(filename, title, sourceLanguage, sourceObjectKey, status, null);
+    }
+
+    public BookEntity(String filename, String title, String sourceLanguage, String sourceObjectKey, BookStatus status, Long ownerUserId) {
         this.filename = filename;
         this.title = title;
         this.sourceLanguage = sourceLanguage;
         this.sourceObjectKey = sourceObjectKey;
+        this.ownerUserId = ownerUserId;
         this.status = status;
     }
 
@@ -78,6 +86,10 @@ public class BookEntity {
         return sourceObjectKey;
     }
 
+    public Long getOwnerUserId() {
+        return ownerUserId;
+    }
+
     public BookStatus getStatus() {
         return status;
     }
@@ -96,6 +108,10 @@ public class BookEntity {
 
     public void updateSourceObjectKey(String sourceObjectKey) {
         this.sourceObjectKey = sourceObjectKey;
+    }
+
+    public void assignOwner(Long ownerUserId) {
+        this.ownerUserId = ownerUserId;
     }
 
     public void markStatus(BookStatus status) {

@@ -1,5 +1,6 @@
 package com.fanbook.export.application;
 
+import com.fanbook.book.application.BookAccessService;
 import com.fanbook.book.domain.BookEntity;
 import com.fanbook.book.domain.SegmentEntity;
 import com.fanbook.book.domain.SegmentStatus;
@@ -33,17 +34,26 @@ public class ExportService {
     private final SegmentRepository segmentRepository;
     private final StorageService storageService;
     private final ExportArtifactRepository artifactRepository;
+    private final BookAccessService bookAccessService;
 
     public ExportService(
             BookRepository bookRepository,
             SegmentRepository segmentRepository,
             StorageService storageService,
-            ExportArtifactRepository artifactRepository
+            ExportArtifactRepository artifactRepository,
+            BookAccessService bookAccessService
     ) {
         this.bookRepository = bookRepository;
         this.segmentRepository = segmentRepository;
         this.storageService = storageService;
         this.artifactRepository = artifactRepository;
+        this.bookAccessService = bookAccessService;
+    }
+
+    @Transactional
+    public ExportArtifactEntity exportZhForCurrentUser(Long bookId) {
+        bookAccessService.requireAccessibleBook(bookId);
+        return exportZh(bookId);
     }
 
     @Transactional
@@ -52,8 +62,20 @@ public class ExportService {
     }
 
     @Transactional
+    public ExportArtifactEntity exportBilingualForCurrentUser(Long bookId) {
+        bookAccessService.requireAccessibleBook(bookId);
+        return exportBilingual(bookId);
+    }
+
+    @Transactional
     public ExportArtifactEntity exportBilingual(Long bookId) {
         return export(bookId, ExportArtifactKind.BILINGUAL_EPUB, "bilingual.epub", true);
+    }
+
+    @Transactional(readOnly = true)
+    public ExportArtifactEntity requireReadyArtifactForCurrentUser(Long bookId, ExportArtifactKind kind) {
+        bookAccessService.requireAccessibleBook(bookId);
+        return requireReadyArtifact(bookId, kind);
     }
 
     @Transactional(readOnly = true)

@@ -1,10 +1,10 @@
 package com.fanbook.reader.application;
 
+import com.fanbook.book.application.BookAccessService;
 import com.fanbook.book.domain.BookEntity;
 import com.fanbook.book.domain.ChapterEntity;
 import com.fanbook.book.domain.SegmentEntity;
 import com.fanbook.book.domain.SegmentStatus;
-import com.fanbook.book.infrastructure.BookRepository;
 import com.fanbook.book.infrastructure.ChapterRepository;
 import com.fanbook.book.infrastructure.SegmentRepository;
 import com.fanbook.common.error.ErrorCode;
@@ -24,29 +24,29 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class ReaderApplicationService {
 
-    private final BookRepository bookRepository;
     private final ChapterRepository chapterRepository;
     private final SegmentRepository segmentRepository;
     private final TranslationJobRepository jobRepository;
     private final SegmentNoteRepository noteRepository;
+    private final BookAccessService bookAccessService;
 
     public ReaderApplicationService(
-            BookRepository bookRepository,
             ChapterRepository chapterRepository,
             SegmentRepository segmentRepository,
             TranslationJobRepository jobRepository,
-            SegmentNoteRepository noteRepository
+            SegmentNoteRepository noteRepository,
+            BookAccessService bookAccessService
     ) {
-        this.bookRepository = bookRepository;
         this.chapterRepository = chapterRepository;
         this.segmentRepository = segmentRepository;
         this.jobRepository = jobRepository;
         this.noteRepository = noteRepository;
+        this.bookAccessService = bookAccessService;
     }
 
     @Transactional(readOnly = true)
     public ReaderInfoResponse info(Long bookId) {
-        BookEntity book = requireBook(bookId);
+        BookEntity book = bookAccessService.requireAccessibleBook(bookId);
         TranslationJobResponse latestJob = jobRepository.findFirstByBookIdOrderByUpdatedAtDescIdDesc(bookId)
                 .map(this::toJobResponse)
                 .orElse(null);
@@ -55,7 +55,7 @@ public class ReaderApplicationService {
 
     @Transactional(readOnly = true)
     public ChapterListResponse chapters(Long bookId) {
-        requireBook(bookId);
+        bookAccessService.requireAccessibleBook(bookId);
         List<ChapterListResponse.ChapterSummary> chapters = chapterRepository.findByBookIdOrderByChapterOrderAsc(bookId).stream()
                 .map(this::toChapterSummary)
                 .toList();
@@ -64,7 +64,7 @@ public class ReaderApplicationService {
 
     @Transactional(readOnly = true)
     public ChapterSegmentResponse segments(Long bookId, Long chapterId, String mode) {
-        requireBook(bookId);
+        bookAccessService.requireAccessibleBook(bookId);
         ChapterEntity chapter = requireChapter(bookId, chapterId);
         List<ChapterSegmentResponse.ReaderSegment> segments = segmentRepository.findByChapterIdOrderBySegmentOrderAsc(chapterId).stream()
                 .map(this::toReaderSegment)
@@ -113,11 +113,6 @@ public class ReaderApplicationService {
                 job.getTranslatedSegments(),
                 job.getFailedSegments()
         );
-    }
-
-    private BookEntity requireBook(Long bookId) {
-        return bookRepository.findById(bookId)
-                .orElseThrow(() -> new FanbookException(ErrorCode.BOOK_NOT_FOUND, HttpStatus.NOT_FOUND, "Book '" + bookId + "' was not found."));
     }
 
     private ChapterEntity requireChapter(Long bookId, Long chapterId) {

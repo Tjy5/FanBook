@@ -4,6 +4,7 @@ import static com.fanbook.translation.domain.TranslationChunkStatus.FAILED;
 import static com.fanbook.translation.domain.TranslationChunkStatus.PENDING;
 import static com.fanbook.translation.domain.TranslationChunkStatus.RUNNING;
 
+import com.fanbook.book.application.BookAccessService;
 import com.fanbook.common.error.ErrorCode;
 import com.fanbook.common.error.FanbookException;
 import com.fanbook.translation.api.TranslationJobResponse;
@@ -30,6 +31,7 @@ public class TranslationResumeService {
     private final TranslationChunkPublisher chunkPublisher;
     private final TranslationRecoveryProperties recoveryProperties;
     private final TransactionTemplate transactionTemplate;
+    private final BookAccessService bookAccessService;
 
     public TranslationResumeService(
             TranslationJobRepository jobRepository,
@@ -37,7 +39,8 @@ public class TranslationResumeService {
             TranslationJobService translationJobService,
             TranslationChunkPublisher chunkPublisher,
             TranslationRecoveryProperties recoveryProperties,
-            TransactionTemplate transactionTemplate
+            TransactionTemplate transactionTemplate,
+            BookAccessService bookAccessService
     ) {
         this.jobRepository = jobRepository;
         this.chunkRepository = chunkRepository;
@@ -45,6 +48,12 @@ public class TranslationResumeService {
         this.chunkPublisher = chunkPublisher;
         this.recoveryProperties = recoveryProperties;
         this.transactionTemplate = transactionTemplate;
+        this.bookAccessService = bookAccessService;
+    }
+
+    public TranslationJobResponse resumeForCurrentUser(Long bookId) {
+        bookAccessService.requireAccessibleBook(bookId);
+        return resume(bookId);
     }
 
     public TranslationJobResponse resume(Long bookId) {

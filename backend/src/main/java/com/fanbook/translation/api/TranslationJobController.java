@@ -34,21 +34,21 @@ public class TranslationJobController {
             @PathVariable Long bookId,
             @RequestBody(required = false) StartTranslationRequest request
     ) {
-        return translationJobService.start(bookId, request, currentUserProvider.requireCurrentUser().username());
+        return translationJobService.startForCurrentUser(bookId, request, currentUserProvider.requireCurrentUser().username());
     }
 
     @GetMapping("/api/translation-jobs/{jobId}")
     public TranslationJobResponse get(@PathVariable Long jobId) {
-        return translationJobService.get(jobId);
+        return translationJobService.getForCurrentUser(jobId);
     }
 
     @PostMapping("/api/books/{bookId}/translation-jobs/resume")
     public TranslationJobResponse resume(@PathVariable Long bookId) {
-        return translationResumeService.resume(bookId);
+        return translationResumeService.resumeForCurrentUser(bookId);
     }
 
     @PostMapping("/api/translation-jobs/{jobId}/cancel")
     public TranslationJobResponse cancel(@PathVariable Long jobId) {
-        return translationJobService.cancel(jobId);
+        return translationJobService.cancelForCurrentUser(jobId);
     }
 }

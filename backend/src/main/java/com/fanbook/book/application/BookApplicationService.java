@@ -1,5 +1,7 @@
 package com.fanbook.book.application;
 
+import com.fanbook.auth.application.CurrentUser;
+import com.fanbook.auth.application.CurrentUserProvider;
 import com.fanbook.book.api.BookResponse;
 import com.fanbook.book.api.BookDetailResponse;
 import com.fanbook.book.api.BookListResponse;
@@ -26,7 +28,6 @@ import java.util.List;
 import java.util.Optional;
 import java.util.stream.Stream;
 import org.springframework.http.HttpStatus;
-import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -40,6 +41,8 @@ public class BookApplicationService {
     private final SegmentRepository segmentRepository;
     private final TranslationJobRepository jobRepository;
     private final ExportArtifactRepository artifactRepository;
+    private final BookAccessService bookAccessService;
+    private final CurrentUserProvider currentUserProvider;
 
     public BookApplicationService(
             EpubParser epubParser,
@@ -48,7 +51,9 @@ public class BookApplicationService {
             ChapterRepository chapterRepository,
             SegmentRepository segmentRepository,
             TranslationJobRepository jobRepository,
-            ExportArtifactRepository artifactRepository
+            ExportArtifactRepository artifactRepository,
+            BookAccessService bookAccessService,
+            CurrentUserProvider currentUserProvider
     ) {
         this.epubParser = epubParser;
         this.storageService = storageService;
@@ -57,6 +62,8 @@ public class BookApplicationService {
         this.segmentRepository = segmentRepository;
         this.jobRepository = jobRepository;
         this.artifactRepository = artifactRepository;
+        this.bookAccessService = bookAccessService;
+        this.currentUserProvider = currentUserProvider;
     }
 
     @Transactional
@@ -66,6 +73,19 @@ public class BookApplicationService {
 
     @Transactional
     public BookResponse upload(String filename, byte[] content, String sourceLanguage, String titleOverride) {
+        return upload(filename, content, sourceLanguage, titleOverride, null);
+    }
+
+    @Transactional
+    public BookResponse uploadForCurrentUser(String filename, byte[] content, String sourceLanguage, String titleOverride) {
+        CurrentUser currentUser = currentUserProvider.requireCurrentUser();
+        if (currentUser.id() == null) {
+            throw new FanbookException(ErrorCode.FORBIDDEN, HttpStatus.FORBIDDEN, "Book uploads require a local user account.");
+        }
+        return upload(filename, content, sourceLanguage, titleOverride, currentUser.id());
+    }
+
+    private BookResponse upload(String filename, byte[] content, String sourceLanguage, String titleOverride, Long ownerUserId) {
         ParsedBook parsed = parse(content);
         String safeFilename = filename == null || filename.isBlank() ? "uploaded.epub" : filename;
         String safeSourceLanguage = sourceLanguage == null || sourceLanguage.isBlank() ? "en" : sourceLanguage.trim();
@@ -75,7 +95,8 @@ public class BookApplicationService {
                 safeTitle,
                 safeSourceLanguage,
                 "books/pending/source.epub",
-                BookStatus.PARSED
+                BookStatus.PARSED,
+                ownerUserId
         ));
 
         String objectKey = "books/" + book.getId() + "/source.epub";
@@ -111,13 +132,13 @@ public class BookApplicationService {
 
     @Transactional(readOnly = true)
     public BookDetailResponse getBook(Long bookId) {
-        BookEntity book = requireBook(bookId);
+        BookEntity book = bookAccessService.requireAccessibleBook(bookId);
         return toDetail(book);
     }
 
     @Transactional(readOnly = true)
     public BookListResponse listBooks() {
-        List<BookListResponse.BookListItemDto> books = bookRepository.findAll(Sort.by(Sort.Direction.DESC, "id")).stream()
+        List<BookListResponse.BookListItemDto> books = bookAccessService.listAccessibleBooks().stream()
                 .map(this::toListItem)
                 .toList();
         BookListResponse.StatusCountsDto counts = new BookListResponse.StatusCountsDto(
@@ -131,7 +152,7 @@ public class BookApplicationService {
 
     @Transactional
     public BookDetailResponse updateTranslatedTitle(Long bookId, String translatedTitle) {
-        BookEntity book = requireBook(bookId);
+        BookEntity book = bookAccessService.requireAccessibleBook(bookId);
         book.updateTranslatedTitle(translatedTitle == null || translatedTitle.isBlank() ? null : translatedTitle.trim());
         return toDetail(book);
     }
@@ -239,11 +260,6 @@ public class BookApplicationService {
                 artifact.getSizeBytes(),
                 artifact.getCreatedAt()
         );
-    }
-
-    private BookEntity requireBook(Long bookId) {
-        return bookRepository.findById(bookId)
-                .orElseThrow(() -> new FanbookException(ErrorCode.BOOK_NOT_FOUND, HttpStatus.NOT_FOUND, "Book '" + bookId + "' was not found."));
     }
 
     private static String titleTranslationStatus(BookEntity book) {

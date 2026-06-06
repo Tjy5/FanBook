@@ -2,6 +2,7 @@ package com.fanbook.export.application;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
+import com.fanbook.book.application.BookAccessService;
 import com.fanbook.book.domain.SegmentEntity;
 import com.fanbook.book.domain.SegmentStatus;
 import com.fanbook.book.infrastructure.BookRepository;
@@ -29,18 +30,27 @@ public class ConsistencyReportService {
     private final SegmentRepository segmentRepository;
     private final StorageService storageService;
     private final ExportArtifactRepository artifactRepository;
+    private final BookAccessService bookAccessService;
     private final ObjectMapper objectMapper = JsonMapper.builder().build();
 
     public ConsistencyReportService(
             BookRepository bookRepository,
             SegmentRepository segmentRepository,
             StorageService storageService,
-            ExportArtifactRepository artifactRepository
+            ExportArtifactRepository artifactRepository,
+            BookAccessService bookAccessService
     ) {
         this.bookRepository = bookRepository;
         this.segmentRepository = segmentRepository;
         this.storageService = storageService;
         this.artifactRepository = artifactRepository;
+        this.bookAccessService = bookAccessService;
+    }
+
+    @Transactional
+    public ExportArtifactEntity generateJsonForCurrentUser(Long bookId) {
+        bookAccessService.requireAccessibleBook(bookId);
+        return generateJson(bookId);
     }
 
     @Transactional
@@ -61,6 +71,12 @@ public class ConsistencyReportService {
     }
 
     @Transactional
+    public ExportArtifactEntity generateMarkdownForCurrentUser(Long bookId) {
+        bookAccessService.requireAccessibleBook(bookId);
+        return generateMarkdown(bookId);
+    }
+
+    @Transactional
     public ExportArtifactEntity generateMarkdown(Long bookId) {
         ReportStats stats = stats(bookId);
         String markdown = """
@@ -73,6 +89,12 @@ public class ConsistencyReportService {
                 - Term warnings: 0
                 """.formatted(bookId, stats.totalSegments(), stats.translatedSegments(), stats.failedSegments());
         return store(bookId, ExportArtifactKind.CONSISTENCY_REPORT_MD, "consistency.md", markdown.getBytes(StandardCharsets.UTF_8));
+    }
+
+    @Transactional(readOnly = true)
+    public ExportArtifactEntity requireReadyArtifactForCurrentUser(Long bookId, ExportArtifactKind kind) {
+        bookAccessService.requireAccessibleBook(bookId);
+        return requireReadyArtifact(bookId, kind);
     }
 
     @Transactional(readOnly = true)

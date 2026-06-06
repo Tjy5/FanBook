@@ -33,46 +33,46 @@ public class ExportController {
 
     @GetMapping("/api/books/{bookId}/exports/zh")
     public ResponseEntity<ByteArrayResource> zh(@PathVariable Long bookId) {
-        var artifact = exportService.requireReadyArtifact(bookId, ExportArtifactKind.ZH_EPUB);
+        var artifact = exportService.requireReadyArtifactForCurrentUser(bookId, ExportArtifactKind.ZH_EPUB);
         return download(artifact.getFilename(), "application/epub+zip", storageService.read(artifact.getObjectKey()));
     }
 
     @PostMapping("/api/books/{bookId}/exports/zh")
     public ExportArtifactResponse generateZh(@PathVariable Long bookId) {
-        return toResponse(exportService.exportZh(bookId));
+        return toResponse(exportService.exportZhForCurrentUser(bookId));
     }
 
     @GetMapping("/api/books/{bookId}/exports/bilingual")
     public ResponseEntity<ByteArrayResource> bilingual(@PathVariable Long bookId) {
-        var artifact = exportService.requireReadyArtifact(bookId, ExportArtifactKind.BILINGUAL_EPUB);
+        var artifact = exportService.requireReadyArtifactForCurrentUser(bookId, ExportArtifactKind.BILINGUAL_EPUB);
         return download(artifact.getFilename(), "application/epub+zip", storageService.read(artifact.getObjectKey()));
     }
 
     @PostMapping("/api/books/{bookId}/exports/bilingual")
     public ExportArtifactResponse generateBilingual(@PathVariable Long bookId) {
-        return toResponse(exportService.exportBilingual(bookId));
+        return toResponse(exportService.exportBilingualForCurrentUser(bookId));
     }
 
     @GetMapping("/api/books/{bookId}/reports/consistency")
     public ResponseEntity<ByteArrayResource> reportJson(@PathVariable Long bookId) {
-        var artifact = reportService.requireReadyArtifact(bookId, ExportArtifactKind.CONSISTENCY_REPORT_JSON);
+        var artifact = reportService.requireReadyArtifactForCurrentUser(bookId, ExportArtifactKind.CONSISTENCY_REPORT_JSON);
         return download(artifact.getFilename(), MediaType.APPLICATION_JSON_VALUE, storageService.read(artifact.getObjectKey()));
     }
 
     @PostMapping("/api/books/{bookId}/reports/consistency")
     public ExportArtifactResponse generateReportJson(@PathVariable Long bookId) {
-        return toResponse(reportService.generateJson(bookId));
+        return toResponse(reportService.generateJsonForCurrentUser(bookId));
     }
 
     @GetMapping("/api/books/{bookId}/reports/consistency.md")
     public ResponseEntity<ByteArrayResource> reportMarkdown(@PathVariable Long bookId) {
-        var artifact = reportService.requireReadyArtifact(bookId, ExportArtifactKind.CONSISTENCY_REPORT_MD);
+        var artifact = reportService.requireReadyArtifactForCurrentUser(bookId, ExportArtifactKind.CONSISTENCY_REPORT_MD);
         return download(artifact.getFilename(), "text/markdown", storageService.read(artifact.getObjectKey()));
     }
 
     @PostMapping("/api/books/{bookId}/reports/consistency.md")
     public ExportArtifactResponse generateReportMarkdown(@PathVariable Long bookId) {
-        return toResponse(reportService.generateMarkdown(bookId));
+        return toResponse(reportService.generateMarkdownForCurrentUser(bookId));
     }
 
     private static ResponseEntity<ByteArrayResource> download(String filename, String mediaType, byte[] content) {

@@ -9,7 +9,13 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.fanbook.auth.domain.UserEntity;
+import com.fanbook.auth.domain.UserRole;
+import com.fanbook.auth.infrastructure.UserRepository;
+import com.fanbook.book.infrastructure.BookRepository;
 import com.fanbook.testsupport.MinimalEpubFactory;
+import java.util.Set;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -18,6 +24,7 @@ import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -33,6 +40,26 @@ class AuthorizationIntegrationTest {
 
     @Autowired
     MockMvc mockMvc;
+
+    @Autowired
+    UserRepository userRepository;
+
+    @Autowired
+    BookRepository bookRepository;
+
+    private UserEntity memberUser;
+
+    @BeforeEach
+    void seedUser() {
+        bookRepository.deleteAll();
+        userRepository.deleteAll();
+        memberUser = userRepository.save(new UserEntity(
+                "member",
+                "member@example.test",
+                "{noop}password",
+                Set.of(UserRole.MEMBER)
+        ));
+    }
 
     @Test
     void apiRequiresAuthentication() throws Exception {
@@ -56,7 +83,7 @@ class AuthorizationIntegrationTest {
     void memberCanUploadWithCsrf() throws Exception {
         MockMultipartFile file = new MockMultipartFile("file", "demo.epub", "application/epub+zip", MinimalEpubFactory.create());
 
-        mockMvc.perform(multipart("/api/books").file(file).param("sourceLanguage", "en").with(member()).with(csrfToken()))
+        mockMvc.perform(multipart("/api/books").file(file).param("sourceLanguage", "en").with(memberUser()).with(csrfToken()))
                 .andExpect(status().isCreated());
     }
 
@@ -65,5 +92,9 @@ class AuthorizationIntegrationTest {
         mockMvc.perform(post("/api/books/1/exports/zh").with(viewer()).with(csrfToken()))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("forbidden"));
+    }
+
+    private RequestPostProcessor memberUser() {
+        return member(memberUser.getId(), memberUser.getUsername());
     }
 }

@@ -20,12 +20,30 @@ public class LocalUserPrincipal implements UserDetails {
     private final Collection<GrantedAuthority> authorities;
 
     public LocalUserPrincipal(UserEntity user) {
-        this.id = user.getId();
-        this.username = user.getUsername();
-        this.email = user.getEmail();
-        this.passwordHash = user.getPasswordHash();
-        this.enabled = user.isEnabled();
-        this.roles = user.getRoles();
+        this(
+                user.getId(),
+                user.getUsername(),
+                user.getEmail(),
+                user.getPasswordHash(),
+                user.isEnabled(),
+                user.getRoles()
+        );
+    }
+
+    public LocalUserPrincipal(
+            Long id,
+            String username,
+            String email,
+            String passwordHash,
+            boolean enabled,
+            Set<UserRole> roles
+    ) {
+        this.id = id;
+        this.username = username;
+        this.email = email;
+        this.passwordHash = passwordHash;
+        this.enabled = enabled;
+        this.roles = Set.copyOf(roles);
         this.authorities = this.roles.stream()
                 .map(role -> new SimpleGrantedAuthority("ROLE_" + role.name()))
                 .collect(Collectors.toUnmodifiableSet());

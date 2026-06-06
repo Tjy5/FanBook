@@ -3,9 +3,9 @@ package com.fanbook.reader.application;
 import com.fanbook.auth.application.CurrentUser;
 import com.fanbook.auth.application.CurrentUserProvider;
 import com.fanbook.auth.domain.UserRole;
+import com.fanbook.book.application.BookAccessService;
 import com.fanbook.book.domain.BookEntity;
 import com.fanbook.book.domain.SegmentEntity;
-import com.fanbook.book.infrastructure.BookRepository;
 import com.fanbook.book.infrastructure.SegmentRepository;
 import com.fanbook.common.error.ErrorCode;
 import com.fanbook.common.error.FanbookException;
@@ -23,26 +23,27 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class SegmentNoteService {
 
-    private final BookRepository bookRepository;
     private final SegmentRepository segmentRepository;
     private final SegmentNoteRepository noteRepository;
     private final CurrentUserProvider currentUserProvider;
+    private final BookAccessService bookAccessService;
 
     public SegmentNoteService(
-            BookRepository bookRepository,
             SegmentRepository segmentRepository,
             SegmentNoteRepository noteRepository,
-            CurrentUserProvider currentUserProvider
+            CurrentUserProvider currentUserProvider,
+            BookAccessService bookAccessService
     ) {
-        this.bookRepository = bookRepository;
         this.segmentRepository = segmentRepository;
         this.noteRepository = noteRepository;
         this.currentUserProvider = currentUserProvider;
+        this.bookAccessService = bookAccessService;
     }
 
     @Transactional
     public SegmentNoteResponse create(Long segmentId, CreateNoteRequest request) {
         SegmentEntity segment = requireSegment(segmentId);
+        bookAccessService.requireAccessToSegment(segment);
         CurrentUser currentUser = currentUserProvider.requireCurrentUser();
         SegmentNoteEntity note = noteRepository.save(new SegmentNoteEntity(
                 segment.getBook(),
@@ -56,7 +57,8 @@ public class SegmentNoteService {
 
     @Transactional(readOnly = true)
     public List<SegmentNoteResponse> notes(Long segmentId) {
-        requireSegment(segmentId);
+        SegmentEntity segment = requireSegment(segmentId);
+        bookAccessService.requireAccessToSegment(segment);
         return noteRepository.findBySegmentIdOrderByCreatedAtAscIdAsc(segmentId).stream()
                 .map(this::toResponse)
                 .toList();
@@ -65,6 +67,7 @@ public class SegmentNoteService {
     @Transactional
     public SegmentNoteResponse update(Long noteId, UpdateNoteRequest request) {
         SegmentNoteEntity note = requireNote(noteId);
+        bookAccessService.requireAccess(note.getBook());
         requireOwnerOrAdmin(note);
         note.update(
                 value(request == null ? null : request.content()),
@@ -76,13 +79,14 @@ public class SegmentNoteService {
     @Transactional
     public void delete(Long noteId) {
         SegmentNoteEntity note = requireNote(noteId);
+        bookAccessService.requireAccess(note.getBook());
         requireOwnerOrAdmin(note);
         noteRepository.delete(note);
     }
 
     @Transactional(readOnly = true)
     public String exportMarkdown(Long bookId) {
-        BookEntity book = requireBook(bookId);
+        BookEntity book = bookAccessService.requireAccessibleBook(bookId);
         StringBuilder markdown = new StringBuilder("# My Notes - ")
                 .append(book.getTitle())
                 .append("\n\n");
@@ -116,11 +120,6 @@ public class SegmentNoteService {
                 note.getCreatedAt(),
                 note.getUpdatedAt()
         );
-    }
-
-    private BookEntity requireBook(Long bookId) {
-        return bookRepository.findById(bookId)
-                .orElseThrow(() -> new FanbookException(ErrorCode.BOOK_NOT_FOUND, HttpStatus.NOT_FOUND, "Book '" + bookId + "' was not found."));
     }
 
     private SegmentEntity requireSegment(Long segmentId) {

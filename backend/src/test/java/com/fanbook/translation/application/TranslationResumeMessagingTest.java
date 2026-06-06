@@ -7,13 +7,18 @@ import static com.fanbook.testsupport.SecurityMockMvcSupport.member;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.fanbook.auth.domain.UserEntity;
+import com.fanbook.auth.domain.UserRole;
+import com.fanbook.auth.infrastructure.UserRepository;
 import com.fanbook.book.application.BookApplicationService;
+import com.fanbook.book.infrastructure.BookRepository;
 import com.fanbook.testsupport.MinimalEpubFactory;
 import com.fanbook.translation.api.StartTranslationRequest;
 import com.fanbook.translation.domain.TranslationChunkStatus;
 import com.fanbook.translation.infrastructure.TranslationChunkRepository;
 import com.fanbook.translation.infrastructure.TranslationJobRepository;
 import java.time.OffsetDateTime;
+import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -25,6 +30,7 @@ import org.springframework.context.annotation.Primary;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -41,6 +47,12 @@ class TranslationResumeMessagingTest {
 
     @Autowired
     BookApplicationService bookApplicationService;
+
+    @Autowired
+    BookRepository bookRepository;
+
+    @Autowired
+    UserRepository userRepository;
 
     @Autowired
     TranslationJobService translationJobService;
@@ -60,8 +72,18 @@ class TranslationResumeMessagingTest {
     @Autowired
     MockMvc mockMvc;
 
+    private UserEntity memberUser;
+
     @BeforeEach
     void clearPublisher() {
+        bookRepository.deleteAll();
+        userRepository.deleteAll();
+        memberUser = userRepository.save(new UserEntity(
+                "member",
+                "member@example.test",
+                "{noop}password",
+                Set.of(UserRole.MEMBER)
+        ));
         publisher.clear();
     }
 
@@ -104,6 +126,7 @@ class TranslationResumeMessagingTest {
     @Test
     void controllerResumePublishesEachChunkOnlyOnce() throws Exception {
         var book = bookApplicationService.upload("demo.epub", MinimalEpubFactory.create(), "en");
+        assignOwner(book.bookId());
         var job = translationJobService.startWithoutDispatch(
                 book.bookId(),
                 new StartTranslationRequest("mock", "mock-translator"),
@@ -111,7 +134,7 @@ class TranslationResumeMessagingTest {
         );
         markJobFailedWithRunningChunk(job.jobId());
 
-        mockMvc.perform(post("/api/books/" + book.bookId() + "/translation-jobs/resume").with(member()).with(csrfToken()))
+        mockMvc.perform(post("/api/books/" + book.bookId() + "/translation-jobs/resume").with(memberUser()).with(csrfToken()))
                 .andExpect(status().isOk());
 
         assertThat(publisher.messages()).hasSize(1);
@@ -124,6 +147,16 @@ class TranslationResumeMessagingTest {
         var chunk = chunkRepository.findByJobIdOrderByChunkOrderAsc(jobId).getFirst();
         chunk.markRunning(OffsetDateTime.now());
         chunkRepository.saveAndFlush(chunk);
+    }
+
+    private void assignOwner(Long bookId) {
+        var book = bookRepository.findById(bookId).orElseThrow();
+        book.assignOwner(memberUser.getId());
+        bookRepository.saveAndFlush(book);
+    }
+
+    private RequestPostProcessor memberUser() {
+        return member(memberUser.getId(), memberUser.getUsername());
     }
 
     @TestConfiguration

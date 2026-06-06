@@ -3,6 +3,7 @@ package com.fanbook.translation.application;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
+import com.fanbook.book.application.BookAccessService;
 import com.fanbook.book.domain.SegmentEntity;
 import com.fanbook.book.infrastructure.SegmentRepository;
 import com.fanbook.common.error.ErrorCode;
@@ -36,6 +37,7 @@ public class TranslationJobService {
     private final ActiveTranslationSessionRepository activeSessionRepository;
     private final TranslationChunkPublisher chunkPublisher;
     private final TranslationChunkPlanningProperties chunkPlanningProperties;
+    private final BookAccessService bookAccessService;
     private final ObjectMapper objectMapper = JsonMapper.builder().build();
 
     public TranslationJobService(
@@ -44,7 +46,8 @@ public class TranslationJobService {
             TranslationChunkRepository chunkRepository,
             ActiveTranslationSessionRepository activeSessionRepository,
             TranslationChunkPlanningProperties chunkPlanningProperties,
-            ObjectProvider<TranslationChunkPublisher> chunkPublisherProvider
+            ObjectProvider<TranslationChunkPublisher> chunkPublisherProvider,
+            BookAccessService bookAccessService
     ) {
         this.segmentRepository = segmentRepository;
         this.jobRepository = jobRepository;
@@ -53,6 +56,13 @@ public class TranslationJobService {
         this.chunkPlanningProperties = chunkPlanningProperties;
         this.chunkPublisher = chunkPublisherProvider.getIfAvailable(() -> message -> {
         });
+        this.bookAccessService = bookAccessService;
+    }
+
+    @Transactional
+    public TranslationJobResponse startForCurrentUser(Long bookId, StartTranslationRequest request, String requestedBy) {
+        bookAccessService.requireAccessibleBook(bookId);
+        return start(bookId, request, requestedBy);
     }
 
     @Transactional
@@ -138,10 +148,24 @@ public class TranslationJobService {
                 .orElseThrow(() -> notFound("Translation job '" + jobId + "' was not found."));
     }
 
+    @Transactional(readOnly = true)
+    public TranslationJobResponse getForCurrentUser(Long jobId) {
+        TranslationJobEntity job = requireJob(jobId);
+        bookAccessService.requireAccess(job.getBook());
+        return toResponse(job);
+    }
+
     @Transactional
     public TranslationJobResponse cancel(Long jobId) {
-        TranslationJobEntity job = jobRepository.findById(jobId)
-                .orElseThrow(() -> notFound("Translation job '" + jobId + "' was not found."));
+        TranslationJobEntity job = requireJob(jobId);
+        job.markCanceled(OffsetDateTime.now());
+        return toResponse(job);
+    }
+
+    @Transactional
+    public TranslationJobResponse cancelForCurrentUser(Long jobId) {
+        TranslationJobEntity job = requireJob(jobId);
+        bookAccessService.requireAccess(job.getBook());
         job.markCanceled(OffsetDateTime.now());
         return toResponse(job);
     }
@@ -162,6 +186,11 @@ public class TranslationJobService {
 
     FanbookException notFound(String message) {
         return new FanbookException(ErrorCode.TRANSLATION_JOB_NOT_FOUND, HttpStatus.NOT_FOUND, message);
+    }
+
+    private TranslationJobEntity requireJob(Long jobId) {
+        return jobRepository.findById(jobId)
+                .orElseThrow(() -> notFound("Translation job '" + jobId + "' was not found."));
     }
 
     private static String value(String candidate, String fallback) {

@@ -11,12 +11,18 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
+import com.fanbook.auth.domain.UserEntity;
+import com.fanbook.auth.domain.UserRole;
+import com.fanbook.auth.infrastructure.UserRepository;
+import com.fanbook.book.infrastructure.BookRepository;
 import com.fanbook.common.lock.BookTranslationLock;
 import com.fanbook.testsupport.MinimalEpubFactory;
 import com.fanbook.translation.application.TranslationChunkPublisher;
 import com.fanbook.translation.application.TranslationJobExecutor;
+import java.util.Set;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -29,6 +35,7 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -46,7 +53,27 @@ class FanbookE2eTest {
     @Autowired
     MockMvc mockMvc;
 
+    @Autowired
+    UserRepository userRepository;
+
+    @Autowired
+    BookRepository bookRepository;
+
+    private UserEntity memberUser;
+
     private final ObjectMapper objectMapper = JsonMapper.builder().build();
+
+    @BeforeEach
+    void seedUser() {
+        bookRepository.deleteAll();
+        userRepository.deleteAll();
+        memberUser = userRepository.save(new UserEntity(
+                "member",
+                "member@example.test",
+                "{noop}password",
+                Set.of(UserRole.MEMBER)
+        ));
+    }
 
     @Test
     void uploadTranslateAndDownloadArtifacts() throws Exception {
@@ -56,13 +83,13 @@ class FanbookE2eTest {
                 "application/epub+zip",
                 MinimalEpubFactory.create()
         );
-        String uploadBody = mockMvc.perform(multipart("/api/books").file(file).param("sourceLanguage", "en").with(member()).with(csrfToken()))
+        String uploadBody = mockMvc.perform(multipart("/api/books").file(file).param("sourceLanguage", "en").with(memberUser()).with(csrfToken()))
                 .andExpect(status().isCreated())
                 .andReturn().getResponse().getContentAsString();
         Long bookId = objectMapper.readTree(uploadBody).get("bookId").asLong();
 
         String jobBody = mockMvc.perform(post("/api/books/" + bookId + "/translation-jobs")
-                        .with(member())
+                        .with(memberUser())
                         .with(csrfToken())
                         .contentType("application/json")
                         .content("{\"providerName\":\"mock\",\"modelName\":\"mock-translator\"}"))
@@ -73,20 +100,20 @@ class FanbookE2eTest {
         assertThat(job.get("bookId").asLong()).isEqualTo(bookId);
         waitUntilCompleted(job.get("jobId").asLong());
 
-        mockMvc.perform(post("/api/books/" + bookId + "/exports/zh").with(member()).with(csrfToken()))
+        mockMvc.perform(post("/api/books/" + bookId + "/exports/zh").with(memberUser()).with(csrfToken()))
                 .andExpect(status().isOk());
-        mockMvc.perform(get("/api/books/" + bookId + "/exports/zh").with(member()))
+        mockMvc.perform(get("/api/books/" + bookId + "/exports/zh").with(memberUser()))
                 .andExpect(status().isOk());
-        mockMvc.perform(post("/api/books/" + bookId + "/reports/consistency").with(member()).with(csrfToken()))
+        mockMvc.perform(post("/api/books/" + bookId + "/reports/consistency").with(memberUser()).with(csrfToken()))
                 .andExpect(status().isOk());
-        mockMvc.perform(get("/api/books/" + bookId + "/reports/consistency").with(member()))
+        mockMvc.perform(get("/api/books/" + bookId + "/reports/consistency").with(memberUser()))
                 .andExpect(status().isOk());
     }
 
     private void waitUntilCompleted(Long jobId) throws Exception {
         long deadline = System.currentTimeMillis() + 10_000;
         while (System.currentTimeMillis() < deadline) {
-            String body = mockMvc.perform(get("/api/translation-jobs/" + jobId).with(member()))
+            String body = mockMvc.perform(get("/api/translation-jobs/" + jobId).with(memberUser()))
                     .andExpect(status().isOk())
                     .andReturn().getResponse().getContentAsString();
             String status = objectMapper.readTree(body).get("status").asText();
@@ -99,6 +126,10 @@ class FanbookE2eTest {
             Thread.sleep(200);
         }
         throw new AssertionError("translation job did not complete within 10 seconds");
+    }
+
+    private RequestPostProcessor memberUser() {
+        return member(memberUser.getId(), memberUser.getUsername());
     }
 
     @TestConfiguration
