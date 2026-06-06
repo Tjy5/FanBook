@@ -219,6 +219,7 @@ const DEMO_SEGMENT_NOTES: Record<number, SegmentNote[]> = {
 type Route = "library" | "translate" | "read" | "settings" | "admin-users";
 type Filter = "all" | "running" | "completed" | "failed";
 type ReaderMode = "bilingual" | "original" | "translated";
+type LoadBookOptions = { silent?: boolean; syncUrl?: boolean };
 type ArtifactKind = "zh" | "bilingual" | "consistency_report";
 type NotesExportFormat = "markdown" | "json";
 
@@ -302,10 +303,15 @@ function App() {
     void loadBooks({ silent: true });
     void loadProviders();
     const requestedBookId = new URL(window.location.href).searchParams.get("bookId");
-    const remembered = requestedBookId || localStorage.getItem(STORAGE_KEY);
+    if (requestedBookId) {
+      setBookIdInput(requestedBookId);
+      void loadBook(bookIdFromStorage(requestedBookId), { silent: true });
+      return;
+    }
+    const remembered = localStorage.getItem(STORAGE_KEY);
     if (remembered) {
       setBookIdInput(remembered);
-      void loadBook(bookIdFromStorage(remembered), { silent: true });
+      void loadBook(bookIdFromStorage(remembered), { silent: true, syncUrl: false });
     } else {
       appendLog("系统已就绪，可以打开演示书或上传自己的 EPUB。");
     }
@@ -426,7 +432,7 @@ function App() {
     }
   }
 
-  async function loadBook(bookId: number, options: { silent?: boolean } = {}) {
+  async function loadBook(bookId: number, options: LoadBookOptions = {}) {
     if (isDemoBookId(bookId)) {
       await loadDemoBook(options);
       return;
@@ -444,7 +450,9 @@ function App() {
       setCurrentBookId(detail.book.id);
       setBookIdInput(String(detail.book.id));
       localStorage.setItem(STORAGE_KEY, String(detail.book.id));
-      updateBookIdSearch(detail.book.id);
+      if (options.syncUrl ?? true) {
+        updateBookIdSearch(detail.book.id);
+      }
       await loadReader(detail.book.id, { preserveSelection: false });
       if (!options.silent) {
         appendLog(`已载入《${displayBookTitle(detail.book) || "未命名"}》。`);
@@ -454,13 +462,15 @@ function App() {
     }
   }
 
-  async function loadDemoBook(options: { silent?: boolean } = {}) {
+  async function loadDemoBook(options: LoadBookOptions = {}) {
     const detail = cloneDemoBookDetail();
     setBookDetail(detail);
     setCurrentBookId(DEMO_BOOK_ID);
     setBookIdInput(DEMO_BOOK_STORAGE_VALUE);
     localStorage.setItem(STORAGE_KEY, DEMO_BOOK_STORAGE_VALUE);
-    updateBookIdSearch(DEMO_BOOK_ID);
+    if (options.syncUrl ?? true) {
+      updateBookIdSearch(DEMO_BOOK_ID);
+    }
     await loadReader(DEMO_BOOK_ID, { preserveSelection: false });
     if (!options.silent) {
       appendLog("已打开 Fanbook 演示书。");
