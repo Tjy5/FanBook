@@ -3,7 +3,6 @@ import { createRoot } from "react-dom/client";
 import {
   Activity,
   Archive,
-  BookMarked,
   BookOpen,
   BookText,
   ChevronLeft,
@@ -219,6 +218,7 @@ const DEMO_SEGMENT_NOTES: Record<number, SegmentNote[]> = {
 type Route = "library" | "translate" | "read" | "settings" | "admin-users";
 type Filter = "all" | "running" | "completed" | "failed";
 type ReaderMode = "bilingual" | "original" | "translated";
+type ReaderPageTone = "source" | "translated";
 type LoadBookOptions = { silent?: boolean; syncUrl?: boolean };
 type ArtifactKind = "zh" | "bilingual" | "consistency_report";
 type NotesExportFormat = "markdown" | "json";
@@ -1455,11 +1455,17 @@ function ReaderPage(props: {
   const pageStart = currentPageIndex * READER_SEGMENTS_PER_PAGE;
   const pageSegments = props.segments.slice(pageStart, pageStart + READER_SEGMENTS_PER_PAGE);
   const currentChapter = props.chapters.find((chapter) => chapterIdOf(chapter) === props.selectedChapterId) || null;
+  const firstPageSegment = pageSegments[0] || null;
+  const selectedSegmentOnPage = props.selectedSegment && pageSegments.some((segment) => segmentIdOf(segment) === segmentIdOf(props.selectedSegment))
+    ? props.selectedSegment
+    : firstPageSegment;
+  const segmentId = segmentIdOf(selectedSegmentOnPage);
+  const pageRange = props.segments.length ? `${pageStart + 1}-${Math.min(pageStart + READER_SEGMENTS_PER_PAGE, props.segments.length)}` : "0";
   return (
     <section className="page-view active">
       <div className="reader-layout">
         <aside className="reader-sidebar surface-panel">
-          <div className="section-heading compact-heading"><div><p className="eyebrow">Reader Lab</p><h2>阅读控制</h2></div></div>
+          <div className="section-heading compact-heading"><div><p className="eyebrow">Reader</p><h2>阅读控制</h2></div></div>
           <div className="reader-bookplate">
             <span style={{ background: getBookCoverStyle(props.currentBook) }} aria-hidden="true">{bookCoverInitials(props.currentBook)}</span>
             <strong>{displayBookTitle(props.currentBook)}</strong>
@@ -1482,15 +1488,15 @@ function ReaderPage(props: {
           <div className="reader-page-mini">
             <span>当前页</span>
             <strong>{currentPageIndex + 1} / {totalPages}</strong>
-            <small>{props.segments.length ? `第 ${pageStart + 1}-${Math.min(pageStart + READER_SEGMENTS_PER_PAGE, props.segments.length)} 段` : "暂无段落"}</small>
+            <small>{props.segments.length ? `本页 ${pageRange} 段` : "暂无内容"}</small>
           </div>
         </aside>
-        <section className="reader-panel surface-panel">
+        <section className={`reader-panel reader-mode-${props.mode}`}>
           <div className="section-heading reader-heading">
             <div>
-              <p className="eyebrow">Reader Page</p>
-              <h2><BookMarked size={18} />{currentChapter?.title || "在线阅读"}</h2>
-              <p>每页显示 {READER_SEGMENTS_PER_PAGE} 个段落，保留当前阅读模式和段落笔记。</p>
+              <p className="eyebrow">Chapter {currentChapter?.chapterOrder || currentChapter?.order || ""}</p>
+              <h2>{currentChapter?.title || "在线阅读"}</h2>
+              <p>{props.mode === "bilingual" ? "左页原文，右页译文。" : props.mode === "original" ? "原文单页阅读。" : "译文单页阅读。"}</p>
             </div>
             <div className="reader-page-controls" aria-label="阅读分页">
               <button className="icon-button" type="button" onClick={() => props.onPageChange(currentPageIndex - 1)} disabled={currentPageIndex <= 0} aria-label="上一页"><ChevronLeft size={17} /></button>
@@ -1498,36 +1504,54 @@ function ReaderPage(props: {
               <button className="icon-button" type="button" onClick={() => props.onPageChange(currentPageIndex + 1)} disabled={currentPageIndex >= totalPages - 1} aria-label="下一页"><ChevronRight size={17} /></button>
             </div>
           </div>
-          <div className="reader-segments">
-            {pageSegments.length ? pageSegments.map((segment) => {
-              const segmentId = segmentIdOf(segment);
-              return (
-                <article key={segmentId} className={`reader-segment${props.mode === "bilingual" ? " bilingual" : " single"}${props.selectedSegmentId === segmentId ? " active" : ""}`}>
-                  <div className="reader-segment-main" role="button" tabIndex={0} onClick={() => segmentId && props.onSelectSegment(segmentId)}>
-                    <header className="reader-segment-head">
-                      <div className="reader-segment-meta">
-                        <strong>段落 #{segment.order || segmentId}</strong>
-                        <span>{segment.type || "segment"}</span>
-                        <span className={`status-pill ${statusBadgeClass(segment.translationStatus || segment.translation_status)}`}>{translateStatus(segment.translationStatus || segment.translation_status)}</span>
-                      </div>
-                    </header>
-                    <div className="reader-segment-body">
-                      {props.mode !== "translated" ? <ReaderColumn label="原文" text={segment.sourceText || segment.source_text || "暂无原文"} /> : null}
-                      {props.mode !== "original" ? <ReaderColumn label="译文" text={segment.translatedText || segment.translated_text || "暂无译文"} /> : null}
-                    </div>
-                  </div>
-                  {props.isMemberLike && segmentId && !props.isDemoBook ? <button className="text-button reader-note-button" type="button" onClick={() => props.onCreateNote(segmentId)}><NotebookPen size={15} />{Number(segment.noteCount ?? segment.note_count ?? 0) > 0 ? `笔记 ${segment.noteCount ?? segment.note_count}` : "添加笔记"}</button> : null}
-                </article>
-              );
-            }) : <div className="empty-state">当前章节没有可显示的段落。</div>}
+          <div className={`reader-book-stage ${props.mode}`} data-reader-mode={props.mode}>
+            {pageSegments.length ? (
+              props.mode === "bilingual" ? (
+                <div className="reader-book-spread" aria-label="双语书页">
+                  <ReaderBookPage
+                    chapterTitle={currentChapter?.title || "在线阅读"}
+                    footnote={`${currentPageIndex + 1} / ${totalPages}`}
+                    label="English"
+                    mode="source"
+                    pageNumber={currentPageIndex * 2 + 1}
+                    segments={pageSegments}
+                    selectedSegmentId={props.selectedSegmentId}
+                    onSelectSegment={props.onSelectSegment}
+                  />
+                  <ReaderBookPage
+                    chapterTitle={displayBookTitle(props.currentBook)}
+                    footnote={`本页 ${pageRange} 段`}
+                    label="中文"
+                    mode="translated"
+                    pageNumber={currentPageIndex * 2 + 2}
+                    segments={pageSegments}
+                    selectedSegmentId={props.selectedSegmentId}
+                    onSelectSegment={props.onSelectSegment}
+                  />
+                </div>
+              ) : (
+                <div className="reader-book-single" aria-label={props.mode === "original" ? "原文书页" : "译文书页"}>
+                  <ReaderBookPage
+                    chapterTitle={currentChapter?.title || displayBookTitle(props.currentBook)}
+                    footnote={`本页 ${pageRange} 段`}
+                    label={props.mode === "original" ? "English" : "中文"}
+                    mode={props.mode === "original" ? "source" : "translated"}
+                    pageNumber={currentPageIndex + 1}
+                    segments={pageSegments}
+                    selectedSegmentId={props.selectedSegmentId}
+                    onSelectSegment={props.onSelectSegment}
+                  />
+                </div>
+              )
+            ) : <div className="empty-state">当前章节没有可显示的内容。</div>}
           </div>
         </section>
-        <aside className="segment-notes-panel surface-panel">
-          {!props.selectedSegment ? <div className="segment-notes-empty empty-state">选择一个段落后，笔记会显示在这里。</div> : (
+        <aside className="segment-notes-panel reader-marginalia surface-panel">
+          {!selectedSegmentOnPage ? <div className="segment-notes-empty empty-state">当前页暂无可记录的内容。</div> : (
             <>
               <div className="segment-notes-header">
-                <div><strong>段落 #{props.selectedSegment.order || segmentIdOf(props.selectedSegment)}</strong><p>{props.selectedSegment.sourceText || props.selectedSegment.source_text || "暂无原文"}</p></div>
-                {props.isMemberLike && segmentIdOf(props.selectedSegment) && !props.isDemoBook ? <button className="text-button" type="button" onClick={() => props.onCreateNote(segmentIdOf(props.selectedSegment)!)}><NotebookPen size={15} />新建笔记</button> : props.isDemoBook ? <span className="status-pill status-neutral">演示笔记只读</span> : null}
+                <div><strong>本页旁注</strong><p>{readerTextForSegment(selectedSegmentOnPage, props.mode === "original" ? "source" : "translated")}</p></div>
+                {props.isMemberLike && segmentId && !props.isDemoBook ? <button className="text-button" type="button" onClick={() => props.onCreateNote(segmentId)}><NotebookPen size={15} />写笔记</button> : props.isDemoBook ? <span className="status-pill status-neutral">演示书只读</span> : null}
               </div>
               <div className="segment-notes-list">
                 {props.notes.length ? props.notes.map((note) => (
@@ -1746,8 +1770,43 @@ function ChapterTable({ chapters }: { chapters: ChapterSummary[] }) {
   );
 }
 
-function ReaderColumn({ label, text }: { label: string; text: string }) {
-  return <div className="reader-segment-column"><span className="reader-segment-kicker">{label}</span><p>{text}</p></div>;
+function ReaderBookPage(props: {
+  chapterTitle: string;
+  footnote: string;
+  label: string;
+  mode: ReaderPageTone;
+  pageNumber: number;
+  segments: ReaderSegment[];
+  selectedSegmentId: number | null;
+  onSelectSegment: (segmentId: number) => void;
+}) {
+  return (
+    <article className={`reader-book-page ${props.mode}`}>
+      <header className="reader-book-page-header">
+        <span>{props.label}</span>
+        <strong>{props.chapterTitle}</strong>
+      </header>
+      <div className="reader-page-content">
+        {props.segments.map((segment) => {
+          const segmentId = segmentIdOf(segment);
+          return (
+            <button
+              key={`${props.mode}-${segmentId || segment.order}`}
+              className={`reader-page-paragraph${props.selectedSegmentId === segmentId ? " active" : ""}`}
+              type="button"
+              onClick={() => segmentId && props.onSelectSegment(segmentId)}
+            >
+              {readerTextForSegment(segment, props.mode)}
+            </button>
+          );
+        })}
+      </div>
+      <footer className="reader-book-page-footer">
+        <span>{props.footnote}</span>
+        <strong>{props.pageNumber}</strong>
+      </footer>
+    </article>
+  );
 }
 
 function ActivityLog({ activity }: { activity: ActivityEntry[] }) {
@@ -1993,6 +2052,13 @@ function chapterIdOf(chapter: ChapterSummary) {
 
 function segmentIdOf(segment: ReaderSegment | null) {
   return Number(segment?.segmentId ?? segment?.id ?? 0) || null;
+}
+
+function readerTextForSegment(segment: ReaderSegment, tone: ReaderPageTone) {
+  if (tone === "source") {
+    return segment.sourceText || segment.source_text || "暂无原文";
+  }
+  return segment.translatedText || segment.translated_text || "暂无译文";
 }
 
 function pickReaderChapterId(chapters: ChapterSummary[], preferred: number | null) {
