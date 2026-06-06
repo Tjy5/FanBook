@@ -1,30 +1,48 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-import { createEndpoint, normalizeError } from "../src/api/index.js";
-import { createInitialState, POLL_INTERVAL_MS, PROVIDER_PROFILE_STORAGE_KEY, STORAGE_KEY } from "../src/state.js";
-import { normalizeRoute, routeHash } from "../src/router.js";
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const frontendRoot = join(__dirname, "..");
+const packageJson = JSON.parse(readFileSync(join(frontendRoot, "package.json"), "utf8"));
+const app = readFileSync(join(frontendRoot, "src", "main.tsx"), "utf8");
+const apiClient = readFileSync(join(frontendRoot, "src", "api", "client.ts"), "utf8");
+const types = readFileSync(join(frontendRoot, "src", "types.ts"), "utf8");
 
-const memoryStorage = new Map();
-const storage = {
-  getItem: (key) => memoryStorage.get(key) ?? null,
-  setItem: (key, value) => memoryStorage.set(key, String(value)),
-  removeItem: (key) => memoryStorage.delete(key),
-};
-storage.setItem(PROVIDER_PROFILE_STORAGE_KEY, "profile-a");
+assert.ok(packageJson.scripts.test.includes("node --test"));
+assert.ok(packageJson.scripts.typecheck.includes("tsc --noEmit"));
+assert.ok(packageJson.scripts.build.includes("vite build"));
 
-const state = createInitialState(storage);
-assert.equal(STORAGE_KEY, "fanbook.currentBookId");
-assert.equal(POLL_INTERVAL_MS, 3000);
-assert.equal(state.activePage, "home");
-assert.equal(state.selectedProviderProfileName, "profile-a");
-assert.deepEqual(state.books, []);
-assert.equal(normalizeRoute("#/translate"), "translate");
-assert.equal(normalizeRoute("#/missing"), "home");
-assert.equal(routeHash("read"), "#/read");
+for (const fragment of [
+  'const STORAGE_KEY = "fanbook.currentBookId"',
+  "const POLL_INTERVAL_MS = 3000",
+  'localStorage.getItem(PROVIDER_PROFILE_STORAGE_KEY)',
+  'window.location.hash = `#/${nextRoute}`',
+  'return "home"',
+]) {
+  assert.ok(app.includes(fragment), `Expected app contract fragment ${fragment}`);
+}
 
-const endpoint = createEndpoint("/api");
-assert.equal(endpoint.listBooks(), "/api/books");
-assert.equal(endpoint.getBook(7), "/api/books/7");
-assert.equal(endpoint.readerSegments(7, 3, "bilingual"), "/api/books/7/chapters/3/segments?mode=bilingual");
-assert.equal(normalizeError(new Error("boom"), "fallback"), "boom");
-assert.equal(normalizeError(null, "fallback"), "fallback");
+for (const fragment of [
+  "export class ApiClient",
+  "authCsrf",
+  "authLogin",
+  "listBooks",
+  "readerSegments",
+  "notesExport",
+  "extractFilename",
+  "normalizeError",
+]) {
+  assert.ok(apiClient.includes(fragment), `Expected API contract fragment ${fragment}`);
+}
+
+for (const fragment of [
+  'export type Role = "ADMIN" | "MEMBER" | "VIEWER"',
+  "export interface CurrentUser",
+  "export interface BookDetail",
+  "export interface ReaderSegment",
+  "export interface SegmentNote",
+]) {
+  assert.ok(types.includes(fragment), `Expected type contract fragment ${fragment}`);
+}

@@ -13,6 +13,8 @@ const CONTENT_TYPES = new Map([
   [".css", "text/css; charset=utf-8"],
   [".js", "text/javascript; charset=utf-8"],
   [".mjs", "text/javascript; charset=utf-8"],
+  [".ts", "text/javascript; charset=utf-8"],
+  [".tsx", "text/javascript; charset=utf-8"],
   [".json", "application/json; charset=utf-8"],
   [".png", "image/png"],
   [".jpg", "image/jpeg"],

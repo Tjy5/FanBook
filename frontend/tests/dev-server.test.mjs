@@ -11,14 +11,14 @@ const frontendRoot = join(__dirname, "..");
 
 assert.equal(isProxyRequest("/api/books"), true);
 assert.equal(isProxyRequest("/api/books?status=completed"), true);
-assert.equal(isProxyRequest("/src/app.js"), false);
+assert.equal(isProxyRequest("/src/main.tsx"), false);
 
-assert.equal(contentTypeFor("/src/app.js"), "text/javascript; charset=utf-8");
+assert.equal(contentTypeFor("/src/main.tsx"), "text/javascript; charset=utf-8");
 assert.equal(contentTypeFor("/src/styles.css"), "text/css; charset=utf-8");
 assert.equal(contentTypeFor("/"), "text/html; charset=utf-8");
 
 assert.equal(resolveStaticFile("/", frontendRoot), join(frontendRoot, "index.html"));
-assert.equal(resolveStaticFile("/src/app.js?v=20260602-4", frontendRoot), join(frontendRoot, "src", "app.js"));
+assert.equal(resolveStaticFile("/src/main.tsx?v=20260606", frontendRoot), join(frontendRoot, "src", "main.tsx"));
 assert.equal(resolveStaticFile("/../README.md", frontendRoot), null);
 
 const listen = (server) =>

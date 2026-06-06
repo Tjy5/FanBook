@@ -42,6 +42,10 @@ body {
   min-height: 100%;
 }
 
+#root {
+  min-height: 100vh;
+}
+
 body {
   min-width: 320px;
   color: var(--text);
@@ -1088,6 +1092,12 @@ select:focus-visible,
   gap: 10px;
 }
 
+.export-action-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
 .upload-form {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
@@ -1593,6 +1603,55 @@ select:focus-visible,
   overflow-wrap: anywhere;
 }
 
+/* ========== PAGE: ADMIN ========== */
+.admin-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
+  gap: 18px;
+  align-items: start;
+}
+
+.admin-panel {
+  padding: 20px;
+}
+
+.admin-form {
+  display: grid;
+  gap: 12px;
+  position: sticky;
+  top: 0;
+}
+
+/* ========== AUTH ========== */
+.auth-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background:
+    linear-gradient(135deg, rgba(51, 122, 183, 0.12), transparent 40%),
+    var(--bg);
+}
+
+.auth-panel {
+  width: min(100%, 420px);
+  display: grid;
+  gap: 16px;
+  padding: 24px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.auth-brand {
+  color: var(--text);
+}
+
+.auth-brand small {
+  color: var(--muted);
+}
+
 #reader-empty-action {
   transition: transform 160ms ease, box-shadow 160ms ease, background 160ms ease;
 }
@@ -1660,7 +1719,7 @@ select:focus-visible,
   }
 
   .page-nav {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(86px, 1fr));
   }
 
   .page-nav a {
@@ -1711,7 +1770,8 @@ select:focus-visible,
   }
 
   .translate-grid,
-  .reader-layout {
+  .reader-layout,
+  .admin-grid {
     grid-template-columns: 1fr;
   }
 
@@ -1732,7 +1792,7 @@ select:focus-visible,
 
   .page-nav {
     width: 100%;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(68px, 1fr));
   }
 
   .page-nav a {
@@ -1845,6 +1905,10 @@ select:focus-visible,
 
   .export-list span {
     text-align: left;
+  }
+
+  .export-action-row {
+    grid-template-columns: 1fr;
   }
 
   .reader-segment {
