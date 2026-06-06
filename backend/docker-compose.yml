@@ -2,34 +2,27 @@ services:
   mysql:
     image: mysql:8.4
     environment:
-      MYSQL_DATABASE: fanbook
-      MYSQL_USER: fanbook
-      MYSQL_PASSWORD: fanbook
-      MYSQL_ROOT_PASSWORD: fanbook-root
+      MYSQL_DATABASE: ${FANBOOK_MYSQL_DATABASE:-fanbook}
+      MYSQL_USER: ${FANBOOK_DATASOURCE_USERNAME:?set FANBOOK_DATASOURCE_USERNAME}
+      MYSQL_PASSWORD: ${FANBOOK_DATASOURCE_PASSWORD:?set FANBOOK_DATASOURCE_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${FANBOOK_MYSQL_ROOT_PASSWORD:?set FANBOOK_MYSQL_ROOT_PASSWORD}
     command: ["mysqld", "--character-set-server=utf8mb4", "--collation-server=utf8mb4_0900_ai_ci"]
-    ports:
-      - "3306:3306"
     volumes:
       - fanbook-mysql:/var/lib/mysql
     healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -pfanbook-root --silent"]
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
       interval: 5s
       timeout: 5s
       retries: 20
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
 
   rabbitmq:
     image: rabbitmq:3.13-management
     environment:
-      RABBITMQ_DEFAULT_USER: fanbook
-      RABBITMQ_DEFAULT_PASS: fanbook
-    ports:
-      - "5672:5672"
-      - "15672:15672"
+      RABBITMQ_DEFAULT_USER: ${FANBOOK_RABBITMQ_USERNAME:?set FANBOOK_RABBITMQ_USERNAME}
+      RABBITMQ_DEFAULT_PASS: ${FANBOOK_RABBITMQ_PASSWORD:?set FANBOOK_RABBITMQ_PASSWORD}
 
   backend:
     build: .
@@ -41,19 +34,33 @@ services:
       rabbitmq:
         condition: service_started
     environment:
-      FANBOOK_DATASOURCE_URL: jdbc:mysql://mysql:3306/fanbook?serverTimezone=UTC
-      FANBOOK_DATASOURCE_USERNAME: fanbook
-      FANBOOK_DATASOURCE_PASSWORD: fanbook
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}
+      FANBOOK_DATASOURCE_URL: jdbc:mysql://mysql:3306/${FANBOOK_MYSQL_DATABASE:-fanbook}?serverTimezone=UTC
+      FANBOOK_DATASOURCE_USERNAME: ${FANBOOK_DATASOURCE_USERNAME:?set FANBOOK_DATASOURCE_USERNAME}
+      FANBOOK_DATASOURCE_PASSWORD: ${FANBOOK_DATASOURCE_PASSWORD:?set FANBOOK_DATASOURCE_PASSWORD}
       FANBOOK_REDIS_HOST: redis
       FANBOOK_RABBITMQ_HOST: rabbitmq
-      FANBOOK_RABBITMQ_USERNAME: fanbook
-      FANBOOK_RABBITMQ_PASSWORD: fanbook
+      FANBOOK_RABBITMQ_USERNAME: ${FANBOOK_RABBITMQ_USERNAME:?set FANBOOK_RABBITMQ_USERNAME}
+      FANBOOK_RABBITMQ_PASSWORD: ${FANBOOK_RABBITMQ_PASSWORD:?set FANBOOK_RABBITMQ_PASSWORD}
       FANBOOK_TRANSLATION_LISTENER_AUTO_STARTUP: "true"
       FANBOOK_STORAGE_ROOT: /app/runtime/storage
+      FANBOOK_BOOTSTRAP_ADMIN_USERNAME: ${FANBOOK_BOOTSTRAP_ADMIN_USERNAME:?set FANBOOK_BOOTSTRAP_ADMIN_USERNAME}
+      FANBOOK_BOOTSTRAP_ADMIN_PASSWORD: ${FANBOOK_BOOTSTRAP_ADMIN_PASSWORD:?set FANBOOK_BOOTSTRAP_ADMIN_PASSWORD}
+      FANBOOK_BOOTSTRAP_ADMIN_EMAIL: ${FANBOOK_BOOTSTRAP_ADMIN_EMAIL:-}
+      FANBOOK_SESSION_TIMEOUT: ${FANBOOK_SESSION_TIMEOUT:-30m}
+      FANBOOK_AI_PROVIDER: ${FANBOOK_AI_PROVIDER:-mock}
+      FANBOOK_AI_BASE_URL: ${FANBOOK_AI_BASE_URL:-https://api.openai.com/v1}
+      FANBOOK_AI_API_KEY: ${FANBOOK_AI_API_KEY:-}
+      FANBOOK_AI_MODEL: ${FANBOOK_AI_MODEL:-mock-translator}
     ports:
-      - "8080:8080"
+      - "${FANBOOK_HTTP_PORT:-8080}:8080"
     volumes:
       - fanbook-storage:/app/runtime/storage
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/actuator/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
 
 volumes:
   fanbook-mysql:
