@@ -1,6 +1,8 @@
 package com.fanbook.book.api;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static com.fanbook.testsupport.SecurityMockMvcSupport.csrfToken;
+import static com.fanbook.testsupport.SecurityMockMvcSupport.member;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
@@ -61,7 +63,7 @@ class BookControllerIntegrationTest {
                 MinimalEpubFactory.create()
         );
 
-        mockMvc.perform(multipart("/api/books").file(file).param("sourceLanguage", "en"))
+        mockMvc.perform(multipart("/api/books").file(file).param("sourceLanguage", "en").with(member()).with(csrfToken()))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.title").value("Demo Book"))
                 .andExpect(jsonPath("$.chapters").value(1))
@@ -83,7 +85,9 @@ class BookControllerIntegrationTest {
         mockMvc.perform(multipart("/api/books")
                         .file(file)
                         .param("sourceLanguage", "en")
-                        .param("title", "Custom Dashboard Title"))
+                        .param("title", "Custom Dashboard Title")
+                        .with(member())
+                        .with(csrfToken()))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.title").value("Custom Dashboard Title"));
 
@@ -93,10 +97,28 @@ class BookControllerIntegrationTest {
     }
 
     @Test
+    void rejectsNonEpubFilenameBeforeParsing() throws Exception {
+        MockMultipartFile file = new MockMultipartFile(
+                "file",
+                "demo.txt",
+                "text/plain",
+                "not epub".getBytes()
+        );
+
+        mockMvc.perform(multipart("/api/books")
+                        .file(file)
+                        .param("sourceLanguage", "en")
+                        .with(member())
+                        .with(csrfToken()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("invalid_epub"));
+    }
+
+    @Test
     void readsBookDetailForDashboard() throws Exception {
         Long bookId = uploadDemoBook();
 
-        mockMvc.perform(get("/api/books/" + bookId))
+        mockMvc.perform(get("/api/books/" + bookId).with(member()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.book.id").value(bookId))
                 .andExpect(jsonPath("$.book.title").value("Demo Book"))
@@ -116,7 +138,7 @@ class BookControllerIntegrationTest {
     void listsBooksForDashboardLibrary() throws Exception {
         Long bookId = uploadDemoBook();
 
-        mockMvc.perform(get("/api/books"))
+        mockMvc.perform(get("/api/books").with(member()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.books[0].id").value(bookId))
                 .andExpect(jsonPath("$.books[0].title").value("Demo Book"))
@@ -134,6 +156,8 @@ class BookControllerIntegrationTest {
         Long bookId = uploadDemoBook();
 
         mockMvc.perform(patch("/api/books/" + bookId + "/translated-title")
+                        .with(member())
+                        .with(csrfToken())
                         .contentType("application/json")
                         .content("{\"translated_title\":\"演示书\"}"))
                 .andExpect(status().isOk())
@@ -149,7 +173,7 @@ class BookControllerIntegrationTest {
                 "application/epub+zip",
                 MinimalEpubFactory.create()
         );
-        String response = mockMvc.perform(multipart("/api/books").file(file).param("sourceLanguage", "en"))
+        String response = mockMvc.perform(multipart("/api/books").file(file).param("sourceLanguage", "en").with(member()).with(csrfToken()))
                 .andExpect(status().isCreated())
                 .andReturn().getResponse().getContentAsString();
         return Long.valueOf(response.replaceAll(".*\"bookId\":(\\d+).*", "$1"));

@@ -7,6 +7,7 @@ import com.fanbook.book.application.BookApplicationService;
 import com.fanbook.testsupport.MinimalEpubFactory;
 import com.fanbook.translation.api.StartTranslationRequest;
 import com.fanbook.translation.infrastructure.ActiveTranslationSessionRepository;
+import com.fanbook.translation.infrastructure.TranslationChunkRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,6 +28,7 @@ class TranslationJobServiceMessagingTest {
         registry.add("spring.jpa.database-platform", () -> "org.hibernate.dialect.H2Dialect");
         registry.add("fanbook.storage.root", () -> "target/job-messaging-storage");
         registry.add("fanbook.ai.provider", () -> "mock");
+        registry.add("fanbook.translation.max-segments-per-chunk", () -> 1);
     }
 
     @Autowired
@@ -37,6 +39,9 @@ class TranslationJobServiceMessagingTest {
 
     @Autowired
     ActiveTranslationSessionRepository activeSessionRepository;
+
+    @Autowired
+    TranslationChunkRepository chunkRepository;
 
     @Autowired
     FakeTranslationChunkPublisher publisher;
@@ -54,7 +59,8 @@ class TranslationJobServiceMessagingTest {
 
         assertThat(activeSessionRepository.findById(book.bookId())).isPresent();
         assertThat(publisher.messages()).allSatisfy(message -> assertThat(message.jobId()).isEqualTo(job.jobId()));
-        assertThat(publisher.messages()).isNotEmpty();
+        assertThat(publisher.messages()).hasSize(3);
+        assertThat(chunkRepository.findByJobIdOrderByChunkOrderAsc(job.jobId())).hasSize(3);
     }
 
     @Test

@@ -1,6 +1,8 @@
 package com.fanbook.book.api;
 
 import com.fanbook.book.application.BookApplicationService;
+import com.fanbook.common.error.ErrorCode;
+import com.fanbook.common.error.FanbookException;
 import java.io.IOException;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -29,6 +31,7 @@ public class BookController {
             @RequestParam(value = "sourceLanguage", defaultValue = "en") String sourceLanguage,
             @RequestParam(value = "title", required = false) String title
     ) throws IOException {
+        validateUpload(file);
         return bookApplicationService.upload(file.getOriginalFilename(), file.getBytes(), sourceLanguage, title);
     }
 
@@ -48,5 +51,16 @@ public class BookController {
             @RequestBody TranslatedTitleRequest request
     ) {
         return bookApplicationService.updateTranslatedTitle(bookId, request.translatedTitle());
+    }
+
+    private static void validateUpload(MultipartFile file) {
+        String filename = file.getOriginalFilename();
+        if (filename == null || !filename.toLowerCase().endsWith(".epub")) {
+            throw new FanbookException(ErrorCode.INVALID_EPUB, HttpStatus.BAD_REQUEST, "Uploaded file must use the .epub extension.");
+        }
+        String contentType = file.getContentType();
+        if (contentType != null && !contentType.isBlank() && !"application/epub+zip".equals(contentType) && !"application/octet-stream".equals(contentType)) {
+            throw new FanbookException(ErrorCode.INVALID_EPUB, HttpStatus.BAD_REQUEST, "Uploaded file must be an EPUB archive.");
+        }
     }
 }

@@ -1,5 +1,6 @@
 package com.fanbook.ai.api;
 
+import static com.fanbook.testsupport.SecurityMockMvcSupport.member;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -33,7 +34,7 @@ class ProviderControllerIntegrationTest {
 
     @Test
     void listsConfiguredProviderProfiles() throws Exception {
-        mockMvc.perform(get("/api/providers"))
+        mockMvc.perform(get("/api/providers").with(member()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.default_profile_name").value("openai-compatible"))
                 .andExpect(jsonPath("$.providers[0].profile_name").value("openai-compatible"))

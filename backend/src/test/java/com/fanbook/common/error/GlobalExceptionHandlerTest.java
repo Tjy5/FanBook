@@ -1,5 +1,7 @@
 package com.fanbook.common.error;
 
+import static com.fanbook.testsupport.SecurityMockMvcSupport.csrfToken;
+import static com.fanbook.testsupport.SecurityMockMvcSupport.member;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -29,7 +31,7 @@ class GlobalExceptionHandlerTest {
 
     @Test
     void returnsStructuredErrorForMissingUploadFile() throws Exception {
-        mockMvc.perform(multipart("/api/books").param("sourceLanguage", "en"))
+        mockMvc.perform(multipart("/api/books").param("sourceLanguage", "en").with(member()).with(csrfToken()))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("invalid_request"))
                 .andExpect(jsonPath("$.traceId").isString());

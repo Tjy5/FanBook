@@ -56,6 +56,17 @@ public class ExportService {
         return export(bookId, ExportArtifactKind.BILINGUAL_EPUB, "bilingual.epub", true);
     }
 
+    @Transactional(readOnly = true)
+    public ExportArtifactEntity requireReadyArtifact(Long bookId, ExportArtifactKind kind) {
+        return artifactRepository.findFirstByBook_IdAndKindAndStatusOrderByCreatedAtDescIdDesc(bookId, kind, ExportArtifactStatus.READY)
+                .filter(artifact -> artifact.getObjectKey() != null && storageService.exists(artifact.getObjectKey()))
+                .orElseThrow(() -> new FanbookException(
+                        ErrorCode.EXPORT_NOT_READY,
+                        HttpStatus.CONFLICT,
+                        "Export artifact '" + kind.name() + "' for book '" + bookId + "' is not ready."
+                ));
+    }
+
     private ExportArtifactEntity export(Long bookId, ExportArtifactKind kind, String filename, boolean bilingual) {
         BookEntity book = bookRepository.findById(bookId)
                 .orElseThrow(() -> new FanbookException(ErrorCode.BOOK_NOT_FOUND, HttpStatus.NOT_FOUND, "Book '" + bookId + "' was not found."));

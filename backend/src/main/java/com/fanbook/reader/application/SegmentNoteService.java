@@ -1,5 +1,8 @@
 package com.fanbook.reader.application;
 
+import com.fanbook.auth.application.CurrentUser;
+import com.fanbook.auth.application.CurrentUserProvider;
+import com.fanbook.auth.domain.UserRole;
 import com.fanbook.book.domain.BookEntity;
 import com.fanbook.book.domain.SegmentEntity;
 import com.fanbook.book.infrastructure.BookRepository;
@@ -23,26 +26,30 @@ public class SegmentNoteService {
     private final BookRepository bookRepository;
     private final SegmentRepository segmentRepository;
     private final SegmentNoteRepository noteRepository;
+    private final CurrentUserProvider currentUserProvider;
 
     public SegmentNoteService(
             BookRepository bookRepository,
             SegmentRepository segmentRepository,
-            SegmentNoteRepository noteRepository
+            SegmentNoteRepository noteRepository,
+            CurrentUserProvider currentUserProvider
     ) {
         this.bookRepository = bookRepository;
         this.segmentRepository = segmentRepository;
         this.noteRepository = noteRepository;
+        this.currentUserProvider = currentUserProvider;
     }
 
     @Transactional
     public SegmentNoteResponse create(Long segmentId, CreateNoteRequest request) {
         SegmentEntity segment = requireSegment(segmentId);
+        CurrentUser currentUser = currentUserProvider.requireCurrentUser();
         SegmentNoteEntity note = noteRepository.save(new SegmentNoteEntity(
                 segment.getBook(),
                 segment,
                 value(request == null ? null : request.content()),
                 clean(request == null ? null : request.highlightColor()),
-                "local"
+                currentUser.username()
         ));
         return toResponse(note);
     }
@@ -58,6 +65,7 @@ public class SegmentNoteService {
     @Transactional
     public SegmentNoteResponse update(Long noteId, UpdateNoteRequest request) {
         SegmentNoteEntity note = requireNote(noteId);
+        requireOwnerOrAdmin(note);
         note.update(
                 value(request == null ? null : request.content()),
                 clean(request == null ? null : request.highlightColor())
@@ -67,7 +75,9 @@ public class SegmentNoteService {
 
     @Transactional
     public void delete(Long noteId) {
-        noteRepository.delete(requireNote(noteId));
+        SegmentNoteEntity note = requireNote(noteId);
+        requireOwnerOrAdmin(note);
+        noteRepository.delete(note);
     }
 
     @Transactional(readOnly = true)
@@ -121,6 +131,13 @@ public class SegmentNoteService {
     private SegmentNoteEntity requireNote(Long noteId) {
         return noteRepository.findById(noteId)
                 .orElseThrow(() -> new FanbookException(ErrorCode.INVALID_REQUEST, HttpStatus.NOT_FOUND, "Note '" + noteId + "' was not found."));
+    }
+
+    private void requireOwnerOrAdmin(SegmentNoteEntity note) {
+        CurrentUser currentUser = currentUserProvider.requireCurrentUser();
+        if (!currentUser.hasRole(UserRole.ADMIN) && !note.getCreatedBy().equals(currentUser.username())) {
+            throw new FanbookException(ErrorCode.FORBIDDEN, HttpStatus.FORBIDDEN, "Only the note owner or an admin can change this note.");
+        }
     }
 
     private String value(String candidate) {

@@ -70,6 +70,8 @@ class ExportServiceIntegrationTest {
 
         assertThat(artifact.getKind()).isEqualTo(ExportArtifactKind.ZH_EPUB);
         assertThat(artifact.getObjectKey()).isEqualTo("exports/" + book.bookId() + "/zh.epub");
+        assertThat(exportService.requireReadyArtifact(book.bookId(), ExportArtifactKind.ZH_EPUB).getId())
+                .isEqualTo(artifact.getId());
         Map<String, String> zip = unzipText(storageService.read(artifact.getObjectKey()));
         assertThat(zip.get("OEBPS/chapter1.xhtml")).contains("[zh] Hello world.");
     }

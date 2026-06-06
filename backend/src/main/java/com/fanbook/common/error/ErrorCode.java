@@ -2,6 +2,12 @@ package com.fanbook.common.error;
 
 public enum ErrorCode {
     INVALID_REQUEST("invalid_request"),
+    UNAUTHENTICATED("unauthenticated"),
+    FORBIDDEN("forbidden"),
+    AUTHENTICATION_FAILED("authentication_failed"),
+    USER_NOT_FOUND("user_not_found"),
+    USER_ALREADY_EXISTS("user_already_exists"),
+    LAST_ADMIN_REQUIRED("last_admin_required"),
     INVALID_EPUB("invalid_epub"),
     BOOK_NOT_FOUND("book_not_found"),
     BOOK_TRANSLATION_IN_PROGRESS("book_translation_in_progress"),

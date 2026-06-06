@@ -1,6 +1,8 @@
 package com.fanbook.e2e;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static com.fanbook.testsupport.SecurityMockMvcSupport.csrfToken;
+import static com.fanbook.testsupport.SecurityMockMvcSupport.member;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -54,12 +56,14 @@ class FanbookE2eTest {
                 "application/epub+zip",
                 MinimalEpubFactory.create()
         );
-        String uploadBody = mockMvc.perform(multipart("/api/books").file(file).param("sourceLanguage", "en"))
+        String uploadBody = mockMvc.perform(multipart("/api/books").file(file).param("sourceLanguage", "en").with(member()).with(csrfToken()))
                 .andExpect(status().isCreated())
                 .andReturn().getResponse().getContentAsString();
         Long bookId = objectMapper.readTree(uploadBody).get("bookId").asLong();
 
         String jobBody = mockMvc.perform(post("/api/books/" + bookId + "/translation-jobs")
+                        .with(member())
+                        .with(csrfToken())
                         .contentType("application/json")
                         .content("{\"providerName\":\"mock\",\"modelName\":\"mock-translator\"}"))
                 .andExpect(status().isCreated())
@@ -69,16 +73,20 @@ class FanbookE2eTest {
         assertThat(job.get("bookId").asLong()).isEqualTo(bookId);
         waitUntilCompleted(job.get("jobId").asLong());
 
-        mockMvc.perform(get("/api/books/" + bookId + "/exports/zh"))
+        mockMvc.perform(post("/api/books/" + bookId + "/exports/zh").with(member()).with(csrfToken()))
                 .andExpect(status().isOk());
-        mockMvc.perform(get("/api/books/" + bookId + "/reports/consistency"))
+        mockMvc.perform(get("/api/books/" + bookId + "/exports/zh").with(member()))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/books/" + bookId + "/reports/consistency").with(member()).with(csrfToken()))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/books/" + bookId + "/reports/consistency").with(member()))
                 .andExpect(status().isOk());
     }
 
     private void waitUntilCompleted(Long jobId) throws Exception {
         long deadline = System.currentTimeMillis() + 10_000;
         while (System.currentTimeMillis() < deadline) {
-            String body = mockMvc.perform(get("/api/translation-jobs/" + jobId))
+            String body = mockMvc.perform(get("/api/translation-jobs/" + jobId).with(member()))
                     .andExpect(status().isOk())
                     .andReturn().getResponse().getContentAsString();
             String status = objectMapper.readTree(body).get("status").asText();

@@ -75,6 +75,17 @@ public class ConsistencyReportService {
         return store(bookId, ExportArtifactKind.CONSISTENCY_REPORT_MD, "consistency.md", markdown.getBytes(StandardCharsets.UTF_8));
     }
 
+    @Transactional(readOnly = true)
+    public ExportArtifactEntity requireReadyArtifact(Long bookId, ExportArtifactKind kind) {
+        return artifactRepository.findFirstByBook_IdAndKindAndStatusOrderByCreatedAtDescIdDesc(bookId, kind, ExportArtifactStatus.READY)
+                .filter(artifact -> artifact.getObjectKey() != null && storageService.exists(artifact.getObjectKey()))
+                .orElseThrow(() -> new FanbookException(
+                        ErrorCode.EXPORT_NOT_READY,
+                        HttpStatus.CONFLICT,
+                        "Report artifact '" + kind.name() + "' for book '" + bookId + "' is not ready."
+                ));
+    }
+
     private ReportStats stats(Long bookId) {
         if (!bookRepository.existsById(bookId)) {
             throw new FanbookException(ErrorCode.BOOK_NOT_FOUND, HttpStatus.NOT_FOUND, "Book '" + bookId + "' was not found.");

@@ -13,6 +13,7 @@ import com.fanbook.translation.domain.TranslationChunkEntity;
 import com.fanbook.translation.domain.TranslationChunkStatus;
 import com.fanbook.translation.domain.TranslationJobEntity;
 import com.fanbook.translation.domain.TranslationJobStatus;
+import com.fanbook.translation.config.TranslationChunkPlanningProperties;
 import com.fanbook.translation.infrastructure.ActiveTranslationSessionRepository;
 import com.fanbook.translation.infrastructure.TranslationChunkRepository;
 import com.fanbook.translation.infrastructure.TranslationJobRepository;
@@ -34,6 +35,7 @@ public class TranslationJobService {
     private final TranslationChunkRepository chunkRepository;
     private final ActiveTranslationSessionRepository activeSessionRepository;
     private final TranslationChunkPublisher chunkPublisher;
+    private final TranslationChunkPlanningProperties chunkPlanningProperties;
     private final ObjectMapper objectMapper = JsonMapper.builder().build();
 
     public TranslationJobService(
@@ -41,12 +43,14 @@ public class TranslationJobService {
             TranslationJobRepository jobRepository,
             TranslationChunkRepository chunkRepository,
             ActiveTranslationSessionRepository activeSessionRepository,
+            TranslationChunkPlanningProperties chunkPlanningProperties,
             ObjectProvider<TranslationChunkPublisher> chunkPublisherProvider
     ) {
         this.segmentRepository = segmentRepository;
         this.jobRepository = jobRepository;
         this.chunkRepository = chunkRepository;
         this.activeSessionRepository = activeSessionRepository;
+        this.chunkPlanningProperties = chunkPlanningProperties;
         this.chunkPublisher = chunkPublisherProvider.getIfAvailable(() -> message -> {
         });
     }
@@ -107,7 +111,10 @@ public class TranslationJobService {
         job.updateProgress(segments.size(), 0, 0, 0);
         jobRepository.save(job);
 
-        ChunkPlanner planner = new ChunkPlanner(6000, 40);
+        ChunkPlanner planner = new ChunkPlanner(
+                chunkPlanningProperties.chunkTargetCharacters(),
+                chunkPlanningProperties.maxSegmentsPerChunk()
+        );
         int order = 1;
         for (List<SegmentEntity> chunkSegments : planner.plan(segments)) {
             List<Long> ids = chunkSegments.stream().map(SegmentEntity::getId).toList();

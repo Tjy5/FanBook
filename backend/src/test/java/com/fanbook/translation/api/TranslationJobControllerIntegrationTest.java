@@ -1,6 +1,8 @@
 package com.fanbook.translation.api;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static com.fanbook.testsupport.SecurityMockMvcSupport.csrfToken;
+import static com.fanbook.testsupport.SecurityMockMvcSupport.member;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -51,14 +53,15 @@ class TranslationJobControllerIntegrationTest {
     @Test
     void createsAndReadsQueuedTranslationJob() throws Exception {
         MockMultipartFile file = new MockMultipartFile("file", "demo.epub", "application/epub+zip", MinimalEpubFactory.create());
-        String uploadBody = mockMvc.perform(multipart("/api/books").file(file).param("sourceLanguage", "en"))
+        String uploadBody = mockMvc.perform(multipart("/api/books").file(file).param("sourceLanguage", "en").with(member()).with(csrfToken()))
                 .andExpect(status().isCreated())
                 .andReturn().getResponse().getContentAsString();
         Long bookId = objectMapper.readTree(uploadBody).get("bookId").asLong();
 
         String jobBody = mockMvc.perform(post("/api/books/" + bookId + "/translation-jobs")
+                        .with(member())
+                        .with(csrfToken())
                         .contentType("application/json")
-                        .header("X-Debug-User", "resume-demo")
                         .content("{\"providerName\":\"mock\",\"modelName\":\"mock-translator\"}"))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.bookId").value(bookId))
@@ -67,7 +70,7 @@ class TranslationJobControllerIntegrationTest {
         Long jobId = objectMapper.readTree(jobBody).get("jobId").asLong();
 
         assertThat(chunkRepository.findByJobIdOrderByChunkOrderAsc(jobId)).hasSize(1);
-        String readBody = mockMvc.perform(get("/api/translation-jobs/" + jobId))
+        String readBody = mockMvc.perform(get("/api/translation-jobs/" + jobId).with(member()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.jobId").value(jobId))
                 .andReturn().getResponse().getContentAsString();

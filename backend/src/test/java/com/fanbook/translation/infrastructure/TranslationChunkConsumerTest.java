@@ -3,6 +3,9 @@ package com.fanbook.translation.infrastructure;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fanbook.book.application.BookApplicationService;
+import com.fanbook.book.domain.BookStatus;
+import com.fanbook.book.infrastructure.BookRepository;
+import com.fanbook.book.infrastructure.ChapterRepository;
 import com.fanbook.book.infrastructure.SegmentRepository;
 import com.fanbook.testsupport.MinimalEpubFactory;
 import com.fanbook.translation.api.StartTranslationRequest;
@@ -49,6 +52,12 @@ class TranslationChunkConsumerTest {
     SegmentRepository segmentRepository;
 
     @Autowired
+    BookRepository bookRepository;
+
+    @Autowired
+    ChapterRepository chapterRepository;
+
+    @Autowired
     TranslationChunkConsumer consumer;
 
     @Autowired
@@ -76,6 +85,14 @@ class TranslationChunkConsumerTest {
                 .isEqualTo(TranslationChunkStatus.COMPLETED);
         assertThat(segmentRepository.findByBookIdOrderByChapterIdAscSegmentOrderAsc(book.bookId()))
                 .allSatisfy(segment -> assertThat(segment.getTranslatedText()).startsWith("[zh] "));
+        var completedJob = jobRepository.findById(job.jobId()).orElseThrow();
+        assertThat(completedJob.getStatus()).isEqualTo(TranslationJobStatus.COMPLETED);
+        assertThat(completedJob.getProgress()).isEqualTo(1.0);
+        assertThat(completedJob.getTranslatedSegments()).isEqualTo(3);
+        assertThat(chapterRepository.findByBookIdOrderByChapterOrderAsc(book.bookId()).getFirst().getTranslatedSegments())
+                .isEqualTo(3);
+        assertThat(bookRepository.findById(book.bookId()).orElseThrow().getStatus())
+                .isEqualTo(BookStatus.TRANSLATED);
     }
 
     @Test

@@ -3,6 +3,7 @@ package com.fanbook.common.error;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -19,6 +20,12 @@ public class GlobalExceptionHandler {
     @ExceptionHandler({MissingServletRequestPartException.class, MissingServletRequestParameterException.class})
     ResponseEntity<ApiErrorResponse> badRequest(Exception exception) {
         return ResponseEntity.badRequest().body(response(ErrorCode.INVALID_REQUEST, exception.getMessage()));
+    }
+
+    @ExceptionHandler(AuthenticationException.class)
+    ResponseEntity<ApiErrorResponse> authentication(AuthenticationException exception) {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(response(ErrorCode.AUTHENTICATION_FAILED, "Invalid username or password."));
     }
 
     @ExceptionHandler(Exception.class)

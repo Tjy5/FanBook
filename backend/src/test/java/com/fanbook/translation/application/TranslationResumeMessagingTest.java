@@ -2,6 +2,8 @@ package com.fanbook.translation.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static com.fanbook.testsupport.SecurityMockMvcSupport.csrfToken;
+import static com.fanbook.testsupport.SecurityMockMvcSupport.member;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -109,7 +111,7 @@ class TranslationResumeMessagingTest {
         );
         markJobFailedWithRunningChunk(job.jobId());
 
-        mockMvc.perform(post("/api/books/" + book.bookId() + "/translation-jobs/resume"))
+        mockMvc.perform(post("/api/books/" + book.bookId() + "/translation-jobs/resume").with(member()).with(csrfToken()))
                 .andExpect(status().isOk());
 
         assertThat(publisher.messages()).hasSize(1);

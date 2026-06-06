@@ -1,5 +1,6 @@
 package com.fanbook.reader.api;
 
+import static com.fanbook.testsupport.SecurityMockMvcSupport.member;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -42,6 +43,7 @@ class ReaderControllerIntegrationTest {
         var chapter = chapterRepository.findByBookIdOrderByChapterOrderAsc(book.bookId()).getFirst();
 
         mockMvc.perform(get("/api/books/" + book.bookId() + "/chapters/" + chapter.getId() + "/segments")
+                        .with(member())
                         .param("mode", "bilingual"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.chapterId").value(chapter.getId()))

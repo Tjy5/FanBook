@@ -2,6 +2,7 @@ package com.fanbook.book.application;
 
 import com.fanbook.book.domain.SegmentType;
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.ArrayList;
@@ -13,16 +14,26 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilderFactory;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.stereotype.Component;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.NodeList;
 
 @Component
+@EnableConfigurationProperties(EpubParserProperties.class)
 public class EpubParser {
 
+    private static final int BUFFER_SIZE = 8192;
+
+    private final EpubParserProperties properties;
+
+    public EpubParser(EpubParserProperties properties) {
+        this.properties = properties;
+    }
+
     public ParsedBook parse(byte[] content) {
-        Archive archive = Archive.read(content);
+        Archive archive = Archive.read(content, properties);
         Document container = xml(archive.get("META-INF/container.xml"), "META-INF/container.xml");
         String opfPath = firstAttribute(container, "rootfile", "full-path");
         if (opfPath.isBlank()) {
@@ -139,12 +150,26 @@ public class EpubParser {
     }
 
     private record Archive(Map<String, byte[]> entries) {
-        static Archive read(byte[] content) {
+        static Archive read(byte[] content, EpubParserProperties properties) {
             try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(content), StandardCharsets.UTF_8)) {
                 Map<String, byte[]> entries = new HashMap<>();
+                byte[] buffer = new byte[BUFFER_SIZE];
+                long expandedBytes = 0;
                 ZipEntry entry;
                 while ((entry = zip.getNextEntry()) != null) {
-                    entries.put(entry.getName(), zip.readAllBytes());
+                    if (entry.isDirectory()) {
+                        continue;
+                    }
+                    String name = normalizedName(entry.getName());
+                    if (entries.size() >= properties.maxEntries()) {
+                        throw new EpubParserException("EPUB archive exceeds the maximum entry count.");
+                    }
+                    byte[] entryContent = readEntry(zip, buffer, properties.maxEntrySize().toBytes());
+                    expandedBytes += entryContent.length;
+                    if (expandedBytes > properties.maxExpandedSize().toBytes()) {
+                        throw new EpubParserException("EPUB archive exceeds the maximum expanded size.");
+                    }
+                    entries.put(name, entryContent);
                 }
                 if (entries.isEmpty()) {
                     throw new EpubParserException("Uploaded file is not a valid EPUB archive.");
@@ -155,6 +180,31 @@ public class EpubParser {
             } catch (Exception e) {
                 throw new EpubParserException("Uploaded file is not a valid EPUB archive.", e);
             }
+        }
+
+        private static byte[] readEntry(ZipInputStream zip, byte[] buffer, long maxEntryBytes) throws java.io.IOException {
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            int read;
+            long entryBytes = 0;
+            while ((read = zip.read(buffer)) != -1) {
+                entryBytes += read;
+                if (entryBytes > maxEntryBytes) {
+                    throw new EpubParserException("EPUB archive entry exceeds the maximum size.");
+                }
+                output.write(buffer, 0, read);
+            }
+            return output.toByteArray();
+        }
+
+        private static String normalizedName(String name) {
+            if (name == null || name.isBlank()) {
+                throw new EpubParserException("EPUB archive contains an invalid member name.");
+            }
+            String normalized = name.replace('\\', '/');
+            if (normalized.startsWith("/") || normalized.contains("../") || normalized.startsWith("../") || normalized.contains("/..")) {
+                throw new EpubParserException("EPUB archive contains an unsafe member path.");
+            }
+            return normalized;
         }
 
         byte[] get(String path) {

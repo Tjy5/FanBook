@@ -29,6 +29,11 @@ spring:
         timezone:
           default_storage: NORMALIZE
 
+server:
+  servlet:
+    session:
+      timeout: ${FANBOOK_SESSION_TIMEOUT:30m}
+
 management:
   endpoints:
     web:
@@ -45,6 +50,14 @@ springdoc:
     path: /swagger-ui.html
 
 fanbook:
+  epub:
+    max-entries: ${FANBOOK_EPUB_MAX_ENTRIES:1000}
+    max-expanded-size: ${FANBOOK_EPUB_MAX_EXPANDED_SIZE:100MB}
+    max-entry-size: ${FANBOOK_EPUB_MAX_ENTRY_SIZE:25MB}
+  bootstrap-admin:
+    username: ${FANBOOK_BOOTSTRAP_ADMIN_USERNAME:}
+    password: ${FANBOOK_BOOTSTRAP_ADMIN_PASSWORD:}
+    email: ${FANBOOK_BOOTSTRAP_ADMIN_EMAIL:}
   storage:
     root: ${FANBOOK_STORAGE_ROOT:./runtime/storage}
   translation:
