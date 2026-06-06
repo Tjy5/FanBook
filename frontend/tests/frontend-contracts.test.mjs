@@ -17,9 +17,13 @@ assert.ok(packageJson.scripts.build.includes("vite build"));
 for (const fragment of [
   'const STORAGE_KEY = "fanbook.currentBookId"',
   "const POLL_INTERVAL_MS = 3000",
+  "const DEMO_BOOK_STORAGE_VALUE = \"demo\"",
+  "cloneDemoBookDetail",
+  "bookIdFromInput",
   'localStorage.getItem(PROVIDER_PROFILE_STORAGE_KEY)',
-  'window.location.hash = `#/${nextRoute}`',
-  'return "home"',
+  'window.location.hash = `#/${routeToHash(nextRoute)}`',
+  'return "library"',
+  'return "admin-users"',
 ]) {
   assert.ok(app.includes(fragment), `Expected app contract fragment ${fragment}`);
 }

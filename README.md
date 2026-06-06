@@ -87,6 +87,25 @@ $env:FANBOOK_BACKEND_URL='http://localhost:8080'; npm run dev
 
 前端会通过 Vite dev server 代理 `/api` 到后端。加载一本书后，前端主页可以按章节阅读原文、译文或双语内容，并为段落创建笔记。`frontend/dev-server.mjs` 仍保留给轻量静态代理测试，但推荐开发入口是 Vite。
 
+只想预览前端界面时，可以使用内置 mock API，不需要启动 Java 后端。开两个终端：
+
+```bash
+cd frontend
+npm run mock-api
+```
+
+```bash
+cd frontend
+npm run dev
+```
+
+mock API 的固定登录账号仅用于本地界面预览：
+
+```text
+用户名：1
+密码：1
+```
+
 默认地址：
 
 - 前端：`http://localhost:5173`
