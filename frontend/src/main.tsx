@@ -6,6 +6,8 @@ import {
   BookMarked,
   BookOpen,
   BookText,
+  ChevronLeft,
+  ChevronRight,
   CheckCircle2,
   Download,
   FileText,
@@ -17,12 +19,14 @@ import {
   Play,
   RefreshCw,
   RotateCcw,
+  Save,
   ScrollText,
   Settings,
   Shield,
   KeyRound,
   ServerCog,
   UploadCloud,
+  UserRound,
   UserRoundPlus,
   UsersRound,
   XCircle,
@@ -58,7 +62,9 @@ import "./styles.css";
 const API_BASE = window.FANBOOK_API_BASE || "/api";
 const STORAGE_KEY = "fanbook.currentBookId";
 const PROVIDER_PROFILE_STORAGE_KEY = "fanbook.translationProviderProfile";
+const SETTINGS_DRAFT_STORAGE_KEY = "fanbook.settingsDraft";
 const POLL_INTERVAL_MS = 3000;
+const READER_SEGMENTS_PER_PAGE = 6;
 const EMPTY_COUNTS: StatusCounts = { total: 0, running: 0, completed: 0, failed: 0 };
 const DEMO_BOOK_ID = -1;
 const DEMO_BOOK_STORAGE_VALUE = "demo";
@@ -214,6 +220,23 @@ type Route = "library" | "translate" | "read" | "settings" | "admin-users";
 type Filter = "all" | "running" | "completed" | "failed";
 type ReaderMode = "bilingual" | "original" | "translated";
 type ArtifactKind = "zh" | "bilingual" | "consistency_report";
+type NotesExportFormat = "markdown" | "json";
+
+interface SettingsDraft {
+  displayName: string;
+  email: string;
+  preferredLanguage: string;
+  defaultReaderMode: ReaderMode;
+  notesExportFormat: NotesExportFormat;
+  aiProfileName: string;
+  providerName: string;
+  modelName: string;
+  apiKey: string;
+  maxRequestsPerMinute: number;
+  globalMaxConcurrency: number;
+  perChapterConcurrency: number;
+  isDefaultProfile: boolean;
+}
 
 interface ActivityEntry {
   time: string;
@@ -241,8 +264,10 @@ function App() {
   const [selectedReaderChapterId, setSelectedReaderChapterId] = useState<number | null>(null);
   const [readerMode, setReaderMode] = useState<ReaderMode>("bilingual");
   const [readerSegments, setReaderSegments] = useState<ReaderSegment[]>([]);
+  const [readerPageIndex, setReaderPageIndex] = useState(0);
   const [selectedReaderSegmentId, setSelectedReaderSegmentId] = useState<number | null>(null);
   const [segmentNotes, setSegmentNotes] = useState<SegmentNote[]>([]);
+  const [settingsDraft, setSettingsDraft] = useState<SettingsDraft>(() => loadSettingsDraft());
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [polling, setPolling] = useState(false);
   const [busyAction, setBusyAction] = useState<string | null>(null);
@@ -315,6 +340,17 @@ function App() {
       setRoute("library");
     }
   }, [currentUser, isAdmin, route]);
+
+  useEffect(() => {
+    if (!currentUser) {
+      return;
+    }
+    setSettingsDraft((current) => hydrateSettingsDraft(current, currentUser, selectedProviderProfile));
+  }, [currentUser, selectedProviderProfile]);
+
+  useEffect(() => {
+    setReaderPageIndex((current) => normalizeReaderPageIndex(current, readerSegments.length));
+  }, [readerSegments.length]);
 
   async function bootstrapAuth() {
     try {
@@ -473,6 +509,9 @@ function App() {
       setReaderSegments(segments);
       const nextSegmentId = pickReaderSegmentId(segments, preserveSelection ? selectedReaderSegmentId : null);
       setSelectedReaderSegmentId(nextSegmentId);
+      if (!preserveSelection) {
+        setReaderPageIndex(0);
+      }
       if (nextSegmentId) {
         await loadSegmentNotes(nextSegmentId);
       } else {
@@ -486,6 +525,9 @@ function App() {
       setReaderSegments(segments);
       const nextSegmentId = pickReaderSegmentId(segments, preserveSelection ? selectedReaderSegmentId : null);
       setSelectedReaderSegmentId(nextSegmentId);
+      if (!preserveSelection) {
+        setReaderPageIndex(0);
+      }
       if (nextSegmentId) {
         await loadSegmentNotes(nextSegmentId);
       } else {
@@ -743,6 +785,38 @@ function App() {
     }
   }
 
+  function changeReaderPage(nextPageIndex: number) {
+    const pageIndex = normalizeReaderPageIndex(nextPageIndex, readerSegments.length);
+    setReaderPageIndex(pageIndex);
+    const firstSegment = readerSegments[pageIndex * READER_SEGMENTS_PER_PAGE];
+    const firstSegmentId = segmentIdOf(firstSegment || null);
+    if (firstSegmentId) {
+      setSelectedReaderSegmentId(firstSegmentId);
+      void loadSegmentNotes(firstSegmentId);
+    }
+  }
+
+  function saveSettings(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const normalized = normalizeSettingsDraft(settingsDraft, currentUser, selectedProviderProfile);
+    setSettingsDraft(normalized);
+    persistSettingsDraft(normalized);
+    setReaderMode(normalized.defaultReaderMode);
+    const matchingProfile = providerProfiles.find((profile) => profile.profile_name === normalized.aiProfileName);
+    if (matchingProfile) {
+      setSelectedProviderProfileName(matchingProfile.profile_name);
+      localStorage.setItem(PROVIDER_PROFILE_STORAGE_KEY, matchingProfile.profile_name);
+    }
+    appendLog("设置已保存到本地草稿。API Key 只保留在当前会话，未写入浏览器存储。");
+  }
+
+  function selectProviderProfile(profileName: string) {
+    const profile = providerProfiles.find((candidate) => candidate.profile_name === profileName) || null;
+    setSelectedProviderProfileName(profileName);
+    localStorage.setItem(PROVIDER_PROFILE_STORAGE_KEY, profileName);
+    setSettingsDraft((current) => hydrateSettingsDraft({ ...current, aiProfileName: profileName }, currentUser, profile));
+  }
+
   async function loadAdminUsers() {
     try {
       const response = await api.listUsers();
@@ -984,6 +1058,7 @@ function App() {
               chapters={readerChapters}
               selectedChapterId={selectedReaderChapterId}
               mode={readerMode}
+              pageIndex={readerPageIndex}
               segments={readerSegments}
               selectedSegmentId={selectedReaderSegmentId}
               selectedSegment={selectedSegment}
@@ -1001,6 +1076,7 @@ function App() {
                   void loadReaderSegments(currentBookId, selectedReaderChapterId, mode, true);
                 }
               }}
+              onPageChange={changeReaderPage}
               onSelectSegment={(segmentId) => {
                 setSelectedReaderSegmentId(segmentId);
                 void loadSegmentNotes(segmentId);
@@ -1012,7 +1088,15 @@ function App() {
           ) : null}
 
           {route === "settings" ? (
-            <SettingsPage currentUser={currentUser} />
+            <SettingsPage
+              currentUser={currentUser}
+              providerProfiles={providerProfiles}
+              selectedProviderProfileName={selectedProviderProfileName}
+              draft={settingsDraft}
+              onDraftChange={setSettingsDraft}
+              onProviderProfileSelect={selectProviderProfile}
+              onSave={saveSettings}
+            />
           ) : null}
 
           {route === "admin-users" && isAdmin ? (
@@ -1077,84 +1161,88 @@ function HomePage(props: {
           <Metric label="已完成" value={props.counts.completed} />
           <Metric label="失败" value={props.counts.failed} />
         </section>
-        <section className="library-panel surface-panel">
-          <div className="section-heading">
-            <div><p className="eyebrow">Private Shelf</p><h2>我的书</h2><p>{hasBooks ? "选择一本书后，翻译和阅读视图会同步更新。" : "你的私人书架还没有书。演示书不会占用这里。"}</p></div>
-          </div>
-          <div className="library-tabs">
-            {(["all", "running", "completed", "failed"] as Filter[]).map((filter) => (
-              <button key={filter} className={`tab-button${props.filter === filter ? " active" : ""}`} type="button" onClick={() => props.onFilter(filter)}>
-                {filterLabel(filter)} <span>{filterCount(filter, props.counts)}</span>
-              </button>
-            ))}
-          </div>
-          <div className="book-list">
-            {filteredBooks.length ? filteredBooks.map((book) => (
-              <BookRow key={book.id} book={book} active={props.currentBookId === book.id} onLoadBook={props.onLoadBook} />
-            )) : (
-              <div className="library-empty-card">
-                <div className="empty-visual compact-empty-visual" aria-hidden="true"><span></span><span></span><span></span></div>
-                <div>
-                  <strong>先读演示书，再上传自己的 EPUB</strong>
-                  <p>演示书是 Fanbook 自写样例，用来展示原文、译文、双语模式和示例笔记。你的私人书籍会在上传后显示在这里。</p>
-                </div>
-                <div className="empty-actions">
-                  <button className="button button-primary" type="button" onClick={() => props.onOpenDemo("read")}><BookOpen size={17} />打开演示书</button>
-                  <button className="button button-secondary" type="button" onClick={() => props.onNavigate("translate")}><UploadCloud size={17} />上传 EPUB</button>
+        <div className="home-primary-stack">
+          <section className="continue-panel surface-panel">
+            <div className="section-heading compact-heading">
+              <div><p className="eyebrow">Continue</p><h2>{hasBooks || props.currentBook ? "继续阅读" : "先体验一次"}</h2></div>
+              <span className="status-pill status-accent">{continueBookLabel}</span>
+            </div>
+            <div className="continue-book-card">
+              <div className="selected-book-cover compact-cover" style={{ background: getBookCoverStyle(continueBook) }}>
+                <span>{bookCoverInitials(continueBook)}</span>
+              </div>
+              <div className="continue-copy">
+                <strong>{displayBookTitle(continueBook)}</strong>
+                <p>{currentBookIsDemo || !props.currentBook ? "打开内置演示书，先看 Fanbook 的双语阅读体验。" : "回到阅读器，继续查看章节、段落和笔记。"}</p>
+                <div className="continue-actions">
+                  <button className="button button-primary compact" type="button" onClick={() => {
+                    if (!props.currentBook || currentBookIsDemo) {
+                      props.onOpenDemo();
+                    }
+                    props.onNavigate("read");
+                  }}><BookOpen size={16} />阅读</button>
+                  <button className="button button-secondary compact" type="button" onClick={() => props.onNavigate("translate")}><Languages size={16} />翻译</button>
                 </div>
               </div>
-            )}
-          </div>
-        </section>
-        <section className="continue-panel surface-panel">
-          <div className="section-heading compact-heading">
-            <div><p className="eyebrow">Continue</p><h2>{hasBooks || props.currentBook ? "继续阅读" : "先体验一次"}</h2></div>
-            <span className="status-pill status-accent">{continueBookLabel}</span>
-          </div>
-          <div className="continue-book-card">
-            <div className="selected-book-cover compact-cover" style={{ background: getBookCoverStyle(continueBook) }}>
-              <span>{bookCoverInitials(continueBook)}</span>
             </div>
-            <div className="continue-copy">
-              <strong>{displayBookTitle(continueBook)}</strong>
-              <p>{currentBookIsDemo || !props.currentBook ? "打开内置演示书，先看 Fanbook 的双语阅读体验。" : "回到阅读器，继续查看章节、段落和笔记。"}</p>
-              <div className="continue-actions">
-                <button className="button button-primary compact" type="button" onClick={() => {
-                  if (!props.currentBook || currentBookIsDemo) {
-                    props.onOpenDemo();
-                  }
-                  props.onNavigate("read");
-                }}><BookOpen size={16} />阅读</button>
-                <button className="button button-secondary compact" type="button" onClick={() => props.onNavigate("translate")}><Languages size={16} />翻译</button>
+          </section>
+          <section className="library-panel surface-panel">
+            <div className="section-heading">
+              <div><p className="eyebrow">Private Shelf</p><h2>我的书</h2><p>{hasBooks ? "选择一本书后，翻译和阅读视图会同步更新。" : "你的私人书架还没有书。演示书不会占用这里。"}</p></div>
+            </div>
+            <div className="library-tabs">
+              {(["all", "running", "completed", "failed"] as Filter[]).map((filter) => (
+                <button key={filter} className={`tab-button${props.filter === filter ? " active" : ""}`} type="button" onClick={() => props.onFilter(filter)}>
+                  {filterLabel(filter)} <span>{filterCount(filter, props.counts)}</span>
+                </button>
+              ))}
+            </div>
+            <div className="book-list">
+              {filteredBooks.length ? filteredBooks.map((book) => (
+                <BookRow key={book.id} book={book} active={props.currentBookId === book.id} onLoadBook={props.onLoadBook} />
+              )) : (
+                <div className="library-empty-card">
+                  <div className="empty-visual compact-empty-visual" aria-hidden="true"><span></span><span></span><span></span></div>
+                  <div>
+                    <strong>先读演示书，再上传自己的 EPUB</strong>
+                    <p>演示书是 Fanbook 自写样例，用来展示原文、译文、双语模式和示例笔记。你的私人书籍会在上传后显示在这里。</p>
+                  </div>
+                  <div className="empty-actions">
+                    <button className="button button-primary" type="button" onClick={() => props.onOpenDemo("read")}><BookOpen size={17} />打开演示书</button>
+                    <button className="button button-secondary" type="button" onClick={() => props.onNavigate("translate")}><UploadCloud size={17} />上传 EPUB</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
+        <div className="home-secondary-stack">
+          <section className="demo-book-panel surface-panel">
+            <div className="section-heading compact-heading">
+              <div><p className="eyebrow">Demo Book</p><h2>Fanbook 演示书</h2></div>
+              <span className="status-pill status-success">内置样例</span>
+            </div>
+            <BookRow book={DEMO_BOOK_LIST_ITEM} active={currentBookIsDemo} onLoadBook={props.onLoadBook} variant="demo" />
+            <p className="demo-book-copy">这本短篇由 Fanbook 提供，只用于体验双语阅读、阅读模式切换和示例笔记。它不是公共版权书，也不会混入你的私人书架统计。</p>
+          </section>
+          <aside className="selected-book-panel surface-panel">
+            <div className="section-heading"><div><p className="eyebrow">Reading Desk</p><h2>当前书籍</h2><p>选中状态</p></div></div>
+            {props.currentBook ? (
+              <>
+              <div className="selected-book-cover" style={{ background: getBookCoverStyle(props.currentBook) }}>
+                <span>{bookCoverInitials(props.currentBook)}</span>
               </div>
-            </div>
-          </div>
-        </section>
-        <section className="demo-book-panel surface-panel">
-          <div className="section-heading compact-heading">
-            <div><p className="eyebrow">Demo Book</p><h2>Fanbook 演示书</h2></div>
-            <span className="status-pill status-success">内置样例</span>
-          </div>
-          <BookRow book={DEMO_BOOK_LIST_ITEM} active={currentBookIsDemo} onLoadBook={props.onLoadBook} variant="demo" />
-          <p className="demo-book-copy">这本短篇由 Fanbook 提供，只用于体验双语阅读、阅读模式切换和示例笔记。它不是公共版权书，也不会混入你的私人书架统计。</p>
-        </section>
-        <aside className="selected-book-panel surface-panel">
-          <div className="section-heading"><div><p className="eyebrow">Reading Desk</p><h2>当前书籍</h2><p>选中状态</p></div></div>
-          {props.currentBook ? (
-            <>
-            <div className="selected-book-cover" style={{ background: getBookCoverStyle(props.currentBook) }}>
-              <span>{bookCoverInitials(props.currentBook)}</span>
-            </div>
-            <dl className="metadata-list">
-              <div><dt>标题</dt><dd>{displayBookTitle(props.currentBook)}</dd></div>
-              <div><dt>文件</dt><dd>{props.currentBook.filename}</dd></div>
-              <div><dt>语言</dt><dd>{sourceLanguageLabel(props.currentBook.source_language)} → 中文</dd></div>
-              <div><dt>类型</dt><dd>{currentBookIsDemo ? "Fanbook 内置演示书" : "私人书籍"}</dd></div>
-              <div><dt>状态</dt><dd><span className={`status-pill ${statusBadgeClass(props.currentBook.status)}`}>{translateStatus(props.currentBook.status)}</span></dd></div>
-            </dl>
-            </>
-          ) : <div className="empty-state">请选择一本私人书籍，或打开演示书体验阅读。</div>}
-        </aside>
+              <dl className="metadata-list">
+                <div><dt>标题</dt><dd>{displayBookTitle(props.currentBook)}</dd></div>
+                <div><dt>文件</dt><dd>{props.currentBook.filename}</dd></div>
+                <div><dt>语言</dt><dd>{sourceLanguageLabel(props.currentBook.source_language)} → 中文</dd></div>
+                <div><dt>类型</dt><dd>{currentBookIsDemo ? "Fanbook 内置演示书" : "私人书籍"}</dd></div>
+                <div><dt>状态</dt><dd><span className={`status-pill ${statusBadgeClass(props.currentBook.status)}`}>{translateStatus(props.currentBook.status)}</span></dd></div>
+              </dl>
+              </>
+            ) : <div className="empty-state">请选择一本私人书籍，或打开演示书体验阅读。</div>}
+          </aside>
+        </div>
       </div>
     </section>
   );
@@ -1327,6 +1415,7 @@ function ReaderPage(props: {
   chapters: ChapterSummary[];
   selectedChapterId: number | null;
   mode: ReaderMode;
+  pageIndex: number;
   segments: ReaderSegment[];
   selectedSegmentId: number | null;
   selectedSegment: ReaderSegment | null;
@@ -1334,6 +1423,7 @@ function ReaderPage(props: {
   onNavigate: (route: Route) => void;
   onSelectChapter: (chapterId: number) => void;
   onMode: (mode: ReaderMode) => void;
+  onPageChange: (pageIndex: number) => void;
   onSelectSegment: (segmentId: number) => void;
   onCreateNote: (segmentId: number) => void;
   onExportNotes: () => void;
@@ -1350,6 +1440,11 @@ function ReaderPage(props: {
       </section>
     );
   }
+  const totalPages = pageCountForSegments(props.segments.length);
+  const currentPageIndex = normalizeReaderPageIndex(props.pageIndex, props.segments.length);
+  const pageStart = currentPageIndex * READER_SEGMENTS_PER_PAGE;
+  const pageSegments = props.segments.slice(pageStart, pageStart + READER_SEGMENTS_PER_PAGE);
+  const currentChapter = props.chapters.find((chapter) => chapterIdOf(chapter) === props.selectedChapterId) || null;
   return (
     <section className="page-view active">
       <div className="reader-layout">
@@ -1374,11 +1469,27 @@ function ReaderPage(props: {
             </select>
           </label>
           <button className="button button-secondary full" type="button" onClick={props.onExportNotes} disabled={props.isDemoBook}><Download size={16} />{props.isDemoBook ? "演示笔记只读" : "导出笔记"}</button>
+          <div className="reader-page-mini">
+            <span>当前页</span>
+            <strong>{currentPageIndex + 1} / {totalPages}</strong>
+            <small>{props.segments.length ? `第 ${pageStart + 1}-${Math.min(pageStart + READER_SEGMENTS_PER_PAGE, props.segments.length)} 段` : "暂无段落"}</small>
+          </div>
         </aside>
         <section className="reader-panel surface-panel">
-          <div className="section-heading"><div><p className="eyebrow">Bilingual Review</p><h2><BookMarked size={18} />在线阅读</h2></div></div>
+          <div className="section-heading reader-heading">
+            <div>
+              <p className="eyebrow">Reader Page</p>
+              <h2><BookMarked size={18} />{currentChapter?.title || "在线阅读"}</h2>
+              <p>每页显示 {READER_SEGMENTS_PER_PAGE} 个段落，保留当前阅读模式和段落笔记。</p>
+            </div>
+            <div className="reader-page-controls" aria-label="阅读分页">
+              <button className="icon-button" type="button" onClick={() => props.onPageChange(currentPageIndex - 1)} disabled={currentPageIndex <= 0} aria-label="上一页"><ChevronLeft size={17} /></button>
+              <span>{currentPageIndex + 1} / {totalPages}</span>
+              <button className="icon-button" type="button" onClick={() => props.onPageChange(currentPageIndex + 1)} disabled={currentPageIndex >= totalPages - 1} aria-label="下一页"><ChevronRight size={17} /></button>
+            </div>
+          </div>
           <div className="reader-segments">
-            {props.segments.length ? props.segments.map((segment) => {
+            {pageSegments.length ? pageSegments.map((segment) => {
               const segmentId = segmentIdOf(segment);
               return (
                 <article key={segmentId} className={`reader-segment${props.mode === "bilingual" ? " bilingual" : " single"}${props.selectedSegmentId === segmentId ? " active" : ""}`}>
@@ -1424,46 +1535,92 @@ function ReaderPage(props: {
   );
 }
 
-function SettingsPage({ currentUser }: { currentUser: CurrentUser }) {
+function SettingsPage(props: {
+  currentUser: CurrentUser;
+  providerProfiles: ProviderProfile[];
+  selectedProviderProfileName: string | null;
+  draft: SettingsDraft;
+  onDraftChange: (draft: SettingsDraft) => void;
+  onProviderProfileSelect: (profileName: string) => void;
+  onSave: (event: React.FormEvent<HTMLFormElement>) => void;
+}) {
+  const selectedProfile = pickProvider(props.providerProfiles, props.selectedProviderProfileName);
+  const draft = props.draft;
+  const updateDraft = <K extends keyof SettingsDraft>(key: K, value: SettingsDraft[K]) => {
+    props.onDraftChange({ ...draft, [key]: value });
+  };
   return (
     <section className="page-view active">
-      <div className="settings-layout">
+      <form className="settings-layout" onSubmit={props.onSave}>
         <section className="surface-panel settings-hero-panel">
           <div>
             <p className="eyebrow">Settings</p>
             <h1>个人 AI 设置</h1>
-            <p className="hero-copy">这里将保存你的 Provider、模型和 API Key，用于翻译你自己的书。密钥保存能力会在后端加密存储完成后接入。</p>
+            <p className="hero-copy">这里管理个人资料、阅读偏好和 AI 翻译配置。当前保存为本地草稿；后端加密密钥存储接入后再同步到服务端。</p>
           </div>
           <div className="settings-user-chip">
-            <span aria-hidden="true"><UserRoundPlus size={18} /></span>
-            <div><strong>{currentUser.username}</strong><small>{currentUser.roles.join(", ")}</small></div>
+            <span aria-hidden="true"><UserRound size={18} /></span>
+            <div><strong>{props.currentUser.username}</strong><small>{props.currentUser.roles.join(", ")}</small></div>
           </div>
         </section>
 
         <section className="surface-panel settings-panel">
           <div className="section-heading">
-            <div><p className="eyebrow">AI Profiles</p><h2><KeyRound size={18} />我的模型配置</h2><p>后续可保存多个配置，并设置一个默认配置。翻译单本书时可以临时切换。</p></div>
+            <div><p className="eyebrow">Profile</p><h2><UserRound size={18} />个人资料</h2><p>这些信息用于本地界面显示和默认阅读行为，不会修改登录账号。</p></div>
+          </div>
+          <div className="settings-form-grid">
+            <label className="field"><span>显示名称</span><input value={draft.displayName} onChange={(event) => updateDraft("displayName", event.target.value)} placeholder={props.currentUser.username} /></label>
+            <label className="field"><span>邮箱</span><input type="email" value={draft.email} onChange={(event) => updateDraft("email", event.target.value)} placeholder="未设置" /></label>
+            <label className="field"><span>首选界面语言</span><select value={draft.preferredLanguage} onChange={(event) => updateDraft("preferredLanguage", event.target.value)}><option value="zh-CN">中文</option><option value="en-US">English</option></select></label>
+            <label className="field"><span>默认阅读模式</span><select value={draft.defaultReaderMode} onChange={(event) => updateDraft("defaultReaderMode", event.target.value as ReaderMode)}><option value="bilingual">双语</option><option value="original">原文</option><option value="translated">译文</option></select></label>
+            <label className="field"><span>笔记导出格式</span><select value={draft.notesExportFormat} onChange={(event) => updateDraft("notesExportFormat", event.target.value as NotesExportFormat)}><option value="markdown">Markdown</option><option value="json">JSON</option></select></label>
+          </div>
+        </section>
+
+        <section className="surface-panel settings-panel settings-ai-panel">
+          <div className="section-heading">
+            <div><p className="eyebrow">AI Profiles</p><h2><KeyRound size={18} />我的模型配置</h2><p>选择平台配置或编辑个人草稿。API Key 当前只保留在输入框中，不写入持久存储。</p></div>
+            <span className={`status-pill ${selectedProfile?.configured ? "status-success" : "status-neutral"}`}>{selectedProfile?.configured ? "平台已配置" : "本地草稿"}</span>
+          </div>
+          <div className="settings-form-grid ai-profile-grid">
+            <label className="field"><span>配置档</span><select value={draft.aiProfileName} onChange={(event) => props.onProviderProfileSelect(event.target.value)}>
+              {props.providerProfiles.length ? props.providerProfiles.map((profile) => <option key={profile.profile_name} value={profile.profile_name}>{profile.profile_name}{profile.is_default ? "（默认）" : ""}</option>) : <option value={draft.aiProfileName}>默认配置</option>}
+            </select></label>
+            <label className="field"><span>Provider</span><select value={draft.providerName} onChange={(event) => updateDraft("providerName", event.target.value)}>
+              {["OpenAI", "Anthropic", "Gemini", "DeepSeek", "Custom"].map((provider) => <option key={provider} value={provider}>{provider}</option>)}
+            </select></label>
+            <label className="field"><span>模型</span><input value={draft.modelName} onChange={(event) => updateDraft("modelName", event.target.value)} placeholder="例如 gpt-4.1-mini" /></label>
+            <label className="field api-key-field"><span>API Key</span><input type="password" value={draft.apiKey} onChange={(event) => updateDraft("apiKey", event.target.value)} placeholder="只保留当前会话，不写入 localStorage" autoComplete="off" /></label>
+            <label className="field"><span>每分钟请求上限</span><input type="number" min={1} max={10000} value={draft.maxRequestsPerMinute} onChange={(event) => updateDraft("maxRequestsPerMinute", numberFromInput(event.target.value, 60))} /></label>
+            <label className="field"><span>全局并发</span><input type="number" min={1} max={64} value={draft.globalMaxConcurrency} onChange={(event) => updateDraft("globalMaxConcurrency", numberFromInput(event.target.value, 4))} /></label>
+            <label className="field"><span>章节内并发</span><input type="number" min={1} max={32} value={draft.perChapterConcurrency} onChange={(event) => updateDraft("perChapterConcurrency", numberFromInput(event.target.value, 2))} /></label>
+            <label className="toggle-field">
+              <input type="checkbox" checked={draft.isDefaultProfile} onChange={(event) => updateDraft("isDefaultProfile", event.target.checked)} />
+              <span>设为默认翻译配置</span>
+            </label>
           </div>
           <div className="settings-profile-list">
-            <article className="settings-profile-card is-default">
-              <div>
-                <strong>默认配置</strong>
-                <p>尚未连接后端个人密钥存储。当前翻译仍沿用平台 Provider 配置。</p>
-              </div>
-              <span className="status-pill status-neutral">待配置</span>
-            </article>
+            {(props.providerProfiles.length ? props.providerProfiles : [settingsDraftToProviderProfile(draft)]).map((profile) => (
+              <button key={profile.profile_name} className={`settings-profile-card${profile.profile_name === draft.aiProfileName ? " is-default" : ""}`} type="button" onClick={() => props.onProviderProfileSelect(profile.profile_name)}>
+                <div>
+                  <strong>{profile.profile_name}</strong>
+                  <p>{profile.provider_name} · {profile.default_model_name} · 并发 {profile.global_max_concurrency}/{profile.per_chapter_concurrency}</p>
+                </div>
+                <span className={`status-pill ${profile.configured ? "status-success" : "status-neutral"}`}>{profile.configured ? "可用" : "待配置"}</span>
+              </button>
+            ))}
           </div>
         </section>
 
-        <section className="surface-panel settings-panel">
+        <section className="surface-panel settings-panel settings-provider-panel">
           <div className="section-heading">
-            <div><p className="eyebrow">Provider</p><h2><ServerCog size={18} />支持的 Provider</h2><p>产品目标是支持 OpenAI、Anthropic、Gemini、DeepSeek 等预设 Provider。</p></div>
+            <div><p className="eyebrow">Provider</p><h2><ServerCog size={18} />支持的 Provider</h2><p>先保留主流 Provider 和自定义入口，后续接入服务端密钥后可扩展为多配置管理。</p></div>
           </div>
           <div className="provider-option-grid" aria-label="支持的 AI Provider">
             {["OpenAI", "Anthropic", "Gemini", "DeepSeek"].map((provider) => (
-              <article key={provider} className="provider-option-card">
+              <article key={provider} className={draft.providerName === provider ? "provider-option-card active" : "provider-option-card"}>
                 <strong>{provider}</strong>
-                <span>计划支持</span>
+                <span>{draft.providerName === provider ? "当前草稿" : "可选预设"}</span>
               </article>
             ))}
           </div>
@@ -1472,6 +1629,7 @@ function SettingsPage({ currentUser }: { currentUser: CurrentUser }) {
         <section className="surface-panel settings-panel settings-security-panel">
           <div className="section-heading compact-heading">
             <div><p className="eyebrow">Security</p><h2><Shield size={18} />密钥安全边界</h2></div>
+            <button className="button button-primary compact" type="submit"><Save size={16} />保存设置</button>
           </div>
           <ul className="settings-check-list">
             <li>API Key 不应长期明文保存在浏览器本地存储。</li>
@@ -1479,7 +1637,7 @@ function SettingsPage({ currentUser }: { currentUser: CurrentUser }) {
             <li>后端需要按用户隔离并加密保存密钥。</li>
           </ul>
         </section>
-      </div>
+      </form>
     </section>
   );
 }
@@ -1683,6 +1841,114 @@ function translationPayload(profile: ProviderProfile | null) {
   return profile ? { providerName: profile.provider_name, modelName: profile.default_model_name } : {};
 }
 
+function defaultSettingsDraft(): SettingsDraft {
+  return {
+    displayName: "",
+    email: "",
+    preferredLanguage: "zh-CN",
+    defaultReaderMode: "bilingual",
+    notesExportFormat: "markdown",
+    aiProfileName: "默认配置",
+    providerName: "OpenAI",
+    modelName: "",
+    apiKey: "",
+    maxRequestsPerMinute: 60,
+    globalMaxConcurrency: 4,
+    perChapterConcurrency: 2,
+    isDefaultProfile: true,
+  };
+}
+
+function loadSettingsDraft(): SettingsDraft {
+  try {
+    const raw = localStorage.getItem(SETTINGS_DRAFT_STORAGE_KEY);
+    if (!raw) {
+      return defaultSettingsDraft();
+    }
+    return normalizeSettingsDraft({ ...defaultSettingsDraft(), ...JSON.parse(raw), apiKey: "" }, null, null);
+  } catch {
+    return defaultSettingsDraft();
+  }
+}
+
+function hydrateSettingsDraft(draft: SettingsDraft, user: CurrentUser | null, profile: ProviderProfile | null): SettingsDraft {
+  const base = normalizeSettingsDraft(draft, user, profile);
+  return {
+    ...base,
+    displayName: base.displayName || user?.username || "",
+    email: base.email || user?.email || "",
+    aiProfileName: profile?.profile_name || base.aiProfileName,
+    providerName: titleCaseProvider(profile?.provider_name || base.providerName),
+    modelName: profile?.default_model_name || base.modelName,
+    maxRequestsPerMinute: numberOrFallback(profile?.max_requests_per_minute, base.maxRequestsPerMinute),
+    globalMaxConcurrency: numberOrFallback(profile?.global_max_concurrency, base.globalMaxConcurrency),
+    perChapterConcurrency: numberOrFallback(profile?.per_chapter_concurrency, base.perChapterConcurrency),
+    isDefaultProfile: profile?.is_default ?? base.isDefaultProfile,
+  };
+}
+
+function normalizeSettingsDraft(draft: SettingsDraft, user: CurrentUser | null, profile: ProviderProfile | null): SettingsDraft {
+  const fallback = defaultSettingsDraft();
+  return {
+    displayName: String(draft.displayName || user?.username || fallback.displayName).trim(),
+    email: String(draft.email || user?.email || fallback.email).trim(),
+    preferredLanguage: draft.preferredLanguage === "en-US" ? "en-US" : "zh-CN",
+    defaultReaderMode: ["bilingual", "original", "translated"].includes(draft.defaultReaderMode) ? draft.defaultReaderMode : fallback.defaultReaderMode,
+    notesExportFormat: draft.notesExportFormat === "json" ? "json" : "markdown",
+    aiProfileName: String(draft.aiProfileName || profile?.profile_name || fallback.aiProfileName).trim(),
+    providerName: titleCaseProvider(String(draft.providerName || profile?.provider_name || fallback.providerName)),
+    modelName: String(draft.modelName || profile?.default_model_name || fallback.modelName).trim(),
+    apiKey: String(draft.apiKey || ""),
+    maxRequestsPerMinute: numberOrFallback(draft.maxRequestsPerMinute, fallback.maxRequestsPerMinute),
+    globalMaxConcurrency: numberOrFallback(draft.globalMaxConcurrency, fallback.globalMaxConcurrency),
+    perChapterConcurrency: numberOrFallback(draft.perChapterConcurrency, fallback.perChapterConcurrency),
+    isDefaultProfile: Boolean(draft.isDefaultProfile),
+  };
+}
+
+function persistSettingsDraft(draft: SettingsDraft) {
+  const { apiKey: _apiKey, ...safeDraft } = draft;
+  localStorage.setItem(SETTINGS_DRAFT_STORAGE_KEY, JSON.stringify(safeDraft));
+}
+
+function settingsDraftToProviderProfile(draft: SettingsDraft): ProviderProfile {
+  return {
+    profile_name: draft.aiProfileName || "默认配置",
+    provider_name: draft.providerName,
+    default_model_name: draft.modelName || "未设置模型",
+    configured: Boolean(draft.apiKey),
+    max_requests_per_minute: draft.maxRequestsPerMinute,
+    global_max_concurrency: draft.globalMaxConcurrency,
+    per_chapter_concurrency: draft.perChapterConcurrency,
+    is_default: draft.isDefaultProfile,
+  };
+}
+
+function numberFromInput(value: string, fallback: number) {
+  return numberOrFallback(Number(value), fallback);
+}
+
+function numberOrFallback(value: number | null | undefined, fallback: number) {
+  return Number.isFinite(Number(value)) && Number(value) > 0 ? Number(value) : fallback;
+}
+
+function titleCaseProvider(value: string) {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "openai") {
+    return "OpenAI";
+  }
+  if (normalized === "anthropic") {
+    return "Anthropic";
+  }
+  if (normalized === "gemini") {
+    return "Gemini";
+  }
+  if (normalized === "deepseek") {
+    return "DeepSeek";
+  }
+  return value.trim() || "Custom";
+}
+
 function totalsFromChapters(chapters: ChapterSummary[]) {
   return chapters.reduce((totals, chapter) => ({
     total: totals.total + totalOf(chapter),
@@ -1731,6 +1997,14 @@ function pickReaderSegmentId(segments: ReaderSegment[], preferred: number | null
     return preferred;
   }
   return segmentIdOf(segments[0]) || null;
+}
+
+function pageCountForSegments(segmentCount: number) {
+  return Math.max(1, Math.ceil(segmentCount / READER_SEGMENTS_PER_PAGE));
+}
+
+function normalizeReaderPageIndex(pageIndex: number, segmentCount: number) {
+  return Math.max(0, Math.min(pageCountForSegments(segmentCount) - 1, Number.isFinite(pageIndex) ? pageIndex : 0));
 }
 
 function jobIdOf(job: TranslationJob | null | undefined) {
