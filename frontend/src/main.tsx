@@ -15,6 +15,8 @@ import {
   LibraryBig,
   LogOut,
   NotebookPen,
+  PanelLeftClose,
+  PanelLeftOpen,
   Play,
   RefreshCw,
   RotateCcw,
@@ -1005,8 +1007,10 @@ function App() {
   const artifacts = bookDetail?.artifacts || [];
   const selectedSegment = readerSegments.find((segment) => segmentIdOf(segment) === selectedReaderSegmentId) || null;
 
+  const appShellClassName = `app-shell ${route === "read" ? "app-shell-reader" : ""}`;
+
   return (
-    <div className="app-shell">
+    <div className={appShellClassName} data-route={route}>
       <aside className="app-sidebar" aria-label="Fanbook 工作区">
         <a className="brand" href="#/library" onClick={(event) => { event.preventDefault(); navigateTo("library"); }}>
           <span className="brand-mark" aria-hidden="true"><BookOpen size={22} /></span>
@@ -1484,9 +1488,10 @@ function ReaderPage(props: {
   onCreateNote: (segmentId: number) => void;
   onExportNotes: () => void;
 }) {
+  const [readerControlsCollapsed, setReaderControlsCollapsed] = useState(true);
   if (!props.currentBook) {
     return (
-      <section className="page-view active">
+      <section className="page-view active reader-view">
         <div className="page-empty-state">
           <div className="empty-visual reader-empty-visual" aria-hidden="true"><span></span><span></span><span></span></div>
           <h2>未选择阅读书籍</h2>
@@ -1507,11 +1512,48 @@ function ReaderPage(props: {
     : firstPageSegment;
   const segmentId = segmentIdOf(selectedSegmentOnPage);
   const pageRange = props.segments.length ? `${pageStart + 1}-${Math.min(pageStart + READER_SEGMENTS_PER_PAGE, props.segments.length)}` : "0";
+  const readerControlsPanelId = "reader-controls-panel";
+  const modeLabel = props.mode === "bilingual" ? "双语" : props.mode === "original" ? "原文" : "译文";
+  const layoutClassName = `reader-layout ${readerControlsCollapsed ? "reader-layout-collapsed" : "reader-layout-expanded"}`;
   return (
-    <section className="page-view active">
-      <div className="reader-layout">
-        <aside className="reader-sidebar surface-panel">
-          <div className="section-heading compact-heading"><div><p className="eyebrow">Reader</p><h2>阅读控制</h2></div></div>
+    <section className="page-view active reader-view">
+      <div className={layoutClassName} data-controls-collapsed={readerControlsCollapsed}>
+        {readerControlsCollapsed ? (
+          <aside className="reader-control-rail surface-panel" aria-label="阅读控制摘要">
+            <button
+              className="icon-button reader-rail-toggle"
+              type="button"
+              onClick={() => setReaderControlsCollapsed(false)}
+              aria-controls={readerControlsPanelId}
+              aria-expanded={false}
+              aria-label="展开阅读控制"
+            >
+              <PanelLeftOpen size={18} />
+            </button>
+            <span className="reader-rail-book-mark" style={{ background: getBookCoverStyle(props.currentBook) }} aria-hidden="true">
+              {bookCoverInitials(props.currentBook)}
+            </span>
+            <div className="reader-rail-summary">
+              <span>{modeLabel}</span>
+              <strong>{currentPageIndex + 1} / {totalPages}</strong>
+              <small>{props.segments.length ? `${pageRange} 段` : "暂无内容"}</small>
+            </div>
+          </aside>
+        ) : null}
+        <aside id={readerControlsPanelId} className="reader-sidebar surface-panel" aria-label="阅读控制" hidden={readerControlsCollapsed}>
+          <div className="section-heading compact-heading reader-sidebar-heading">
+            <div><p className="eyebrow">阅读器</p><h2>阅读控制</h2></div>
+            <button
+              className="icon-button reader-sidebar-toggle"
+              type="button"
+              onClick={() => setReaderControlsCollapsed(true)}
+              aria-controls={readerControlsPanelId}
+              aria-expanded={!readerControlsCollapsed}
+              aria-label="收起阅读控制"
+            >
+              <PanelLeftClose size={18} />
+            </button>
+          </div>
           <div className="reader-bookplate">
             <span style={{ background: getBookCoverStyle(props.currentBook) }} aria-hidden="true">{bookCoverInitials(props.currentBook)}</span>
             <strong>{displayBookTitle(props.currentBook)}</strong>
@@ -1540,7 +1582,7 @@ function ReaderPage(props: {
         <section className={`reader-panel reader-mode-${props.mode}`}>
           <div className="section-heading reader-heading">
             <div>
-              <p className="eyebrow">Chapter {currentChapter?.chapterOrder || currentChapter?.order || ""}</p>
+              <p className="eyebrow">章节 {currentChapter?.chapterOrder || currentChapter?.order || ""}</p>
               <h2>{currentChapter?.title || "在线阅读"}</h2>
               <p>{props.mode === "bilingual" ? "左页原文，右页译文。" : props.mode === "original" ? "原文单页阅读。" : "译文单页阅读。"}</p>
             </div>
@@ -1557,7 +1599,7 @@ function ReaderPage(props: {
                   <ReaderBookPage
                     chapterTitle={currentChapter?.title || "在线阅读"}
                     footnote={`${currentPageIndex + 1} / ${totalPages}`}
-                    label="English"
+                    label="原文"
                     mode="source"
                     pageNumber={currentPageIndex * 2 + 1}
                     segments={pageSegments}
@@ -1580,7 +1622,7 @@ function ReaderPage(props: {
                   <ReaderBookPage
                     chapterTitle={currentChapter?.title || displayBookTitle(props.currentBook)}
                     footnote={`本页 ${pageRange} 段`}
-                    label={props.mode === "original" ? "English" : "中文"}
+                    label={props.mode === "original" ? "原文" : "中文"}
                     mode={props.mode === "original" ? "source" : "translated"}
                     pageNumber={currentPageIndex + 1}
                     segments={pageSegments}
@@ -1840,6 +1882,7 @@ function ReaderBookPage(props: {
               key={`${props.mode}-${segmentId || segment.order}`}
               className={`reader-page-paragraph${props.selectedSegmentId === segmentId ? " active" : ""}`}
               type="button"
+              aria-pressed={props.selectedSegmentId === segmentId}
               onClick={() => segmentId && props.onSelectSegment(segmentId)}
             >
               {readerTextForSegment(segment, props.mode)}

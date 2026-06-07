@@ -111,6 +111,96 @@ assert.ok(
   "Expected empty-state body text to stay within mobile viewports"
 );
 
+assert.ok(css.includes(".app-shell-reader"), "Expected reader route to keep a reader-specific shell class");
+const readerSidebarRules = css.match(/\.app-shell-reader[^{]*\.app-sidebar[^{]*{[^}]*}/g) || [];
+for (const rule of readerSidebarRules) {
+  assert.doesNotMatch(
+    rule,
+    /\b(display\s*:\s*none|visibility\s*:\s*hidden|opacity\s*:\s*0|width\s*:\s*0|max-width\s*:\s*0|transform\s*:\s*translateX\(\s*-[^)]+\))/i,
+    "Expected reader route sidebar rules not to hide, collapse, or move the ordinary persistent global sidebar"
+  );
+}
+assert.doesNotMatch(
+  css,
+  /\.app-shell-reader\s*{[^}]*grid-template-columns:/,
+  "Expected reader shell not to collapse the app layout into a single column"
+);
+assert.match(
+  css,
+  /\.app-shell-reader \.page-view\.active\.reader-view\s*{[\s\S]*grid-template-rows: minmax\(0, 1fr\);/,
+  "Expected reader view to reserve most viewport height for the reading canvas"
+);
+assert.ok(!css.includes(".reader-route-chrome"), "Expected reader route not to duplicate global route navigation chrome");
+assert.ok(!css.includes(".reader-global-nav"), "Expected reader route not to keep a duplicate global navigation menu");
+assert.match(
+  css,
+  /\.reader-book-stage,\s*\.reader-segments\s*{[\s\S]*width: 100%;/,
+  "Expected bilingual reader stage to use the full available reading column"
+);
+assert.ok(css.includes("width: min(100%, 980px);"), "Expected single-language reader stage to keep a wider but readable cap");
+assert.ok(!css.includes("width: min(100%, 1040px);"), "Expected reader stage to stop using the old bilingual width cap");
+assert.ok(!css.includes("width: min(100%, 760px);"), "Expected reader stage to stop using the old single-language width cap");
+assert.match(
+  css,
+  /\.reader-layout\s*{[\s\S]*grid-template-columns: minmax\(52px, 64px\) minmax\(0, 1fr\) clamp\(208px, 18vw, 284px\);/,
+  "Expected collapsed reader layout to reserve a compact control rail and a side notes column"
+);
+assert.match(
+  css,
+  /\.reader-layout\s*{[\s\S]*grid-template-areas: "controls reader notes";/,
+  "Expected reader notes to sit beside the first-screen reading stage on desktop"
+);
+assert.match(
+  css,
+  /\.reader-layout\s*{[\s\S]*grid-template-rows: minmax\(0, 1fr\);/,
+  "Expected desktop reader layout to fit the reading workspace into one viewport row"
+);
+assert.match(
+  css,
+  /\.reader-layout-expanded\s*{[\s\S]*grid-template-columns: minmax\(190px, 226px\) minmax\(0, 1fr\) clamp\(200px, 16vw, 270px\);/,
+  "Expected expanded reader layout to restore controls while preserving the side notes column"
+);
+assert.match(
+  css,
+  /\.reader-book-stage,\s*\.reader-segments\s*{[\s\S]*--reader-page-min-height: 0;/,
+  "Expected desktop reader pages to avoid forcing the whole reader route to scroll"
+);
+assert.match(
+  css,
+  /\.reader-book-stage,\s*\.reader-segments\s*{[\s\S]*height: 100%;/,
+  "Expected desktop reader stage to fill the available reader row instead of extending below it"
+);
+assert.match(
+  css,
+  /\.reader-page-content\s*{[\s\S]*max-width: 74ch;/,
+  "Expected wide reader pages to keep text measure readable inside larger pages"
+);
+assert.match(
+  css,
+  /\.reader-page-content\s*{[\s\S]*overflow: auto;/,
+  "Expected overlong reader text to scroll inside the page instead of pushing notes below the viewport"
+);
+assert.match(
+  css,
+  /\.reader-marginalia,\s*\.segment-notes-panel\s*{[\s\S]*grid-template-rows: auto minmax\(0, 1fr\);/,
+  "Expected the notes panel to behave as a compact side companion with its own scroll area"
+);
+assert.match(
+  css,
+  /@media \(max-width: 1040px\)[\s\S]*\.reader-layout\s*{[\s\S]*grid-template-areas:\s*"controls"\s*"reader"\s*"notes";/,
+  "Expected tablet reader layout to stack controls, reader, and notes"
+);
+assert.match(
+  css,
+  /@media \(max-width: 1040px\)[\s\S]*\.reader-layout-collapsed,\s*\.reader-layout-expanded\s*{[\s\S]*grid-template-columns: 1fr;/,
+  "Expected collapsed and expanded reader layouts to use one column on tablet"
+);
+assert.match(
+  css,
+  /@media \(max-width: 760px\)[\s\S]*\.reader-book-spread\s*{[\s\S]*grid-template-columns: minmax\(0, 1fr\);/,
+  "Expected mobile bilingual reader pages to stack vertically"
+);
+
 for (const fragment of [
   "DEMO_DETAIL",
   "Book Three: The Prophet",

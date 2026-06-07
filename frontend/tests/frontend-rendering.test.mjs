@@ -21,6 +21,19 @@ for (const fragment of [
   "先读演示书，再上传自己的 EPUB",
   "DEMO_BOOK_ID",
   "READER_SEGMENTS_PER_PAGE",
+  "appShellClassName",
+  "app-shell-reader",
+  "readerControlsCollapsed",
+  "书架",
+  "设置",
+  "reader-layout-collapsed",
+  "reader-control-rail",
+  "PanelLeftOpen",
+  "PanelLeftClose",
+  "展开阅读控制",
+  "收起阅读控制",
+  "aria-controls={readerControlsPanelId}",
+  "aria-pressed={props.selectedSegmentId === segmentId}",
   "reader-page-controls",
   "个人 AI 设置",
   "个人资料",
@@ -37,3 +50,40 @@ for (const fragment of [
 ]) {
   assert.ok(app.includes(fragment), `Expected React rendering source to include ${fragment}`);
 }
+
+assert.match(
+  app,
+  /const \[readerControlsCollapsed, setReaderControlsCollapsed\] = useState\(true\);/,
+  "Expected reader controls to default to the collapsed, reading-focused state"
+);
+assert.match(
+  app,
+  /const appShellClassName = `app-shell \$\{route === "read" \? "app-shell-reader" : ""\}`;/,
+  "Expected the reader route to keep its reader shell class"
+);
+assert.ok(!app.includes("readerGlobalNavOpen"), "Expected reader route to avoid duplicate in-reader global navigation state");
+assert.ok(!app.includes("readerGlobalNavId"), "Expected reader route to avoid duplicate in-reader global navigation IDs");
+assert.ok(!app.includes("reader-route-chrome"), "Expected reader route to rely on the ordinary left navigation instead of reader chrome");
+assert.ok(!app.includes("reader-global-nav"), "Expected reader route to avoid a duplicate global navigation menu");
+assert.ok(!app.includes("打开全局导航"), "Expected reader route not to expose duplicate global navigation copy");
+assert.ok(!app.includes("<Menu"), "Expected reader route not to use a duplicate navigation menu icon");
+assert.match(
+  app,
+  /className=\{layoutClassName\} data-controls-collapsed=\{readerControlsCollapsed\}/,
+  "Expected reader layout to expose collapsed state for CSS"
+);
+assert.match(
+  app,
+  /aria-expanded=\{false\}[\s\S]*aria-label="展开阅读控制"/,
+  "Expected collapsed rail toggle to expose aria-expanded=false and a Chinese label"
+);
+assert.match(
+  app,
+  /<aside id=\{readerControlsPanelId\}[\s\S]*hidden=\{readerControlsCollapsed\}/,
+  "Expected full reader controls panel to be hidden while collapsed"
+);
+assert.match(
+  app,
+  /aria-expanded=\{!readerControlsCollapsed\}[\s\S]*aria-label="收起阅读控制"/,
+  "Expected expanded panel toggle to expose aria-expanded state and a Chinese label"
+);
