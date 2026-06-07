@@ -102,8 +102,8 @@ npm run dev
 mock API 的固定登录账号仅用于本地界面预览：
 
 ```text
-用户名：1
-密码：1
+成员预览账号（MEMBER）：用户名 1，密码 1
+管理员预览账号（ADMIN）：用户名 2，密码 2
 ```
 
 默认地址：
@@ -202,7 +202,11 @@ GET  /api/auth/me
 GET  /api/admin/users
 POST /api/admin/users
 PATCH /api/admin/users/{userId}/roles
+GET  /api/books
 POST /api/books
+GET  /api/books/{bookId}
+PATCH /api/books/{bookId}/translated-title
+GET  /api/providers
 POST /api/books/{bookId}/translation-jobs
 GET  /api/translation-jobs/{jobId}
 POST /api/books/{bookId}/translation-jobs/resume
