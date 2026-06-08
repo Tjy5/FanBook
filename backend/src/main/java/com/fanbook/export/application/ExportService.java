@@ -1,6 +1,8 @@
 package com.fanbook.export.application;
 
 import com.fanbook.book.application.BookAccessService;
+import com.fanbook.book.application.EpubParserException;
+import com.fanbook.book.application.EpubXmlDocuments;
 import com.fanbook.book.application.SegmentInlineMarkup;
 import com.fanbook.book.domain.BookEntity;
 import com.fanbook.book.domain.SegmentEntity;
@@ -29,7 +31,6 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
 import javax.xml.XMLConstants;
-import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.transform.OutputKeys;
 import javax.xml.transform.TransformerFactory;
 import javax.xml.transform.dom.DOMSource;
@@ -298,14 +299,10 @@ public class ExportService {
 
     private static Document xml(byte[] content, String path) {
         try {
-            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-            factory.setNamespaceAware(true);
-            factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
-            factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
-            return factory.newDocumentBuilder().parse(new ByteArrayInputStream(content));
+            return EpubXmlDocuments.parse(content, path);
         } catch (FanbookException exception) {
             throw exception;
-        } catch (Exception exception) {
+        } catch (EpubParserException exception) {
             throw exportFailed("EPUB document '" + path + "' is not well-formed XML.");
         }
     }

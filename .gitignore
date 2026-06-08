@@ -16,6 +16,7 @@ __pycache__/
 .coverage.*
 htmlcov/
 temp/
+/test/
 backend/target/
 backend/runtime/
 frontend/node_modules/

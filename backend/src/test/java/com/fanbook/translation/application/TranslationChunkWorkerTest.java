@@ -124,6 +124,33 @@ class TranslationChunkWorkerTest {
     }
 
     @Test
+    void preservesPunctuationOnlySegmentsWithoutProviderOutput() {
+        var book = bookApplicationService.upload("demo.epub", MinimalEpubFactory.create("""
+                <h1>Chapter One</h1>
+                <p>?</p>
+                <p>Hello world.</p>
+                """), "en");
+        var job = translationJobService.startWithoutDispatch(
+                book.bookId(),
+                new StartTranslationRequest("capture", "capture-model"),
+                "system"
+        );
+        TranslationChunkEntity chunk = chunkRepository.findByJobIdOrderByChunkOrderAsc(job.jobId()).getFirst();
+
+        execute(chunk);
+
+        assertThat(capturingProvider.lastRequest().items())
+                .extracting(item -> item.sourceText())
+                .doesNotContain("?");
+        assertThat(segmentRepository.findByBookIdOrderByChapterIdAscSegmentOrderAsc(book.bookId()))
+                .anySatisfy(segment -> {
+                    if ("?".equals(segment.getSourceText())) {
+                        assertThat(segment.getTranslatedText()).isEqualTo("?");
+                    }
+                });
+    }
+
+    @Test
     void sendsInlinePlaceholderTemplateAndStoresValidatedTranslation() {
         var book = bookApplicationService.upload("demo.epub", MinimalEpubFactory.create("""
                 <h1>Chapter One</h1>

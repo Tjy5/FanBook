@@ -98,8 +98,7 @@ public class TranslationJobExecutor {
             }
             for (TranslationChunkEntity chunk : candidates) {
                 if (chunk.getStatus() == TranslationChunkStatus.FAILED && chunk.getAttemptCount() >= maxAttemptsPerChunk) {
-                    String message = "chunk_retry_exhausted: chunk " + chunk.getId() + " reached " + maxAttemptsPerChunk + " attempts.";
-                    chunk.markFailed(ErrorCode.CHUNK_RETRY_EXHAUSTED.value(), message, OffsetDateTime.now());
+                    String message = exhaustedMessage(chunk);
                     requireJob(jobId).markFailed(message, OffsetDateTime.now());
                     return null;
                 }
@@ -158,6 +157,20 @@ public class TranslationJobExecutor {
             return fanbookException.code().value();
         }
         return ErrorCode.PROVIDER_REQUEST_FAILED.value();
+    }
+
+    private String exhaustedMessage(TranslationChunkEntity chunk) {
+        String message = "chunk_retry_exhausted: chunk " + chunk.getId() + " reached " + maxAttemptsPerChunk + " attempts.";
+        String lastErrorCode = chunk.getLastErrorCode();
+        String lastErrorMessage = chunk.getLastErrorMessage();
+        if (lastErrorCode == null || lastErrorCode.isBlank()) {
+            return message;
+        }
+        String lastError = lastErrorCode;
+        if (lastErrorMessage != null && !lastErrorMessage.isBlank()) {
+            lastError += ": " + lastErrorMessage;
+        }
+        return message + " Last error " + lastError;
     }
 
     private FanbookException notFound(String message) {

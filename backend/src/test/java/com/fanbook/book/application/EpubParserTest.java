@@ -101,6 +101,24 @@ class EpubParserTest {
     }
 
     @Test
+    void parsesHtmlSpineDocumentsWithHtml5VoidTags() {
+        ParsedBook book = parser.parse(htmlEpub("""
+                <h1>Chapter One</h1>
+                <p><img src="cover.png"></p>
+                <p>Hello <em>bright</em> world.</p>
+                """));
+
+        assertThat(book.title()).isEqualTo("HTML Demo");
+        assertThat(book.chapters()).hasSize(1);
+        assertThat(book.chapters().getFirst().sourceDocPath()).isEqualTo("chapter.html");
+        assertThat(book.chapters().getFirst().segments())
+                .extracting(ParsedSegment::sourceText)
+                .containsExactly("Chapter One", "Hello bright world.");
+        assertThat(SegmentInlineMarkup.locator(book.chapters().getFirst().segments().get(1).locatorJson()).sourceTemplate())
+                .isEqualTo("Hello [id0]bright[id1] world.");
+    }
+
+    @Test
     void leavesUnsupportedBlockMarkupOnLegacyPlainTextPath() {
         ParsedBook book = parser.parse(MinimalEpubFactory.create("""
                 <h1>Chapter One</h1>
@@ -193,6 +211,57 @@ class EpubParserTest {
         } catch (Exception exception) {
             throw new IllegalStateException(exception);
         }
+    }
+
+    private static byte[] htmlEpub(String bodyContent) {
+        try {
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            try (ZipOutputStream zip = new ZipOutputStream(output, StandardCharsets.UTF_8)) {
+                entry(zip, "META-INF/container.xml", """
+                        <?xml version="1.0" encoding="UTF-8"?>
+                        <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+                          <rootfiles>
+                            <rootfile full-path="content.opf" media-type="application/oebps-package+xml"/>
+                          </rootfiles>
+                        </container>
+                        """);
+                entry(zip, "content.opf", """
+                        <?xml version="1.0" encoding="UTF-8"?>
+                        <package version="2.0" xmlns="http://www.idpf.org/2007/opf">
+                          <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+                            <dc:title>HTML Demo</dc:title>
+                          </metadata>
+                          <manifest>
+                            <item id="chapter" href="chapter.html" media-type="text/html"/>
+                          </manifest>
+                          <spine>
+                            <itemref idref="chapter"/>
+                          </spine>
+                        </package>
+                        """);
+                entry(zip, "chapter.html", """
+                        <!DOCTYPE html>
+                        <html>
+                          <head>
+                            <meta charset="UTF-8">
+                            <link href="book.css" rel="stylesheet" type="text/css">
+                          </head>
+                          <body>
+                            %s
+                          </body>
+                        </html>
+                        """.formatted(bodyContent));
+            }
+            return output.toByteArray();
+        } catch (Exception exception) {
+            throw new IllegalStateException(exception);
+        }
+    }
+
+    private static void entry(ZipOutputStream zip, String name, String content) throws Exception {
+        zip.putNextEntry(new ZipEntry(name));
+        zip.write(content.getBytes(StandardCharsets.UTF_8));
+        zip.closeEntry();
     }
 
     private static String longParagraph() {

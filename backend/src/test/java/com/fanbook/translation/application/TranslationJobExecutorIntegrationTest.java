@@ -114,9 +114,11 @@ class TranslationJobExecutorIntegrationTest {
         var exhaustedChunk = chunkRepository.findById(chunk.getId()).orElseThrow();
         assertThat(failedJob.getStatus()).isEqualTo(TranslationJobStatus.FAILED);
         assertThat(failedJob.getErrorSummary()).contains("chunk_retry_exhausted");
+        assertThat(failedJob.getErrorSummary()).contains("provider_request_failed: boom");
         assertThat(exhaustedChunk.getStatus()).isEqualTo(TranslationChunkStatus.FAILED);
         assertThat(exhaustedChunk.getAttemptCount()).isEqualTo(3);
-        assertThat(exhaustedChunk.getLastErrorCode()).isEqualTo("chunk_retry_exhausted");
+        assertThat(exhaustedChunk.getLastErrorCode()).isEqualTo("provider_request_failed");
+        assertThat(exhaustedChunk.getLastErrorMessage()).isEqualTo("boom");
     }
 
     @Test

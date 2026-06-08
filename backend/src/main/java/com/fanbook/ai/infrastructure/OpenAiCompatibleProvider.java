@@ -14,6 +14,7 @@ import com.fanbook.translation.application.TranslationPreservationOptions;
 import com.fanbook.common.error.ErrorCode;
 import com.fanbook.common.error.FanbookException;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Semaphore;
@@ -26,6 +27,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientResponseException;
 
 @Component
 @ConditionalOnProperty(name = "fanbook.ai.provider", havingValue = "openai-compatible")
@@ -67,6 +69,8 @@ public class OpenAiCompatibleProvider implements AiTranslationProvider {
     private final ObjectMapper objectMapper;
     private final OpenAiCompatibleProperties properties;
     private final Semaphore semaphore;
+    private final Object requestPaceMonitor = new Object();
+    private long nextRequestAtMillis;
 
     @Autowired
     public OpenAiCompatibleProvider(OpenAiCompatibleProperties properties) {
@@ -126,13 +130,14 @@ public class OpenAiCompatibleProvider implements AiTranslationProvider {
         acquirePermit();
         try {
             String resolvedModelName = modelName == null || modelName.isBlank() ? properties.model() : modelName;
-            Map<String, Object> payload = Map.of(
-                    "model", resolvedModelName,
-                    "instructions", instructions(ANALYSIS_INSTRUCTIONS, request.promptProfile(), request.preservation(), "analysis", false),
-                    "input", objectMapper.writeValueAsString(request)
+            Map<String, Object> payload = payload(
+                    resolvedModelName,
+                    instructions(ANALYSIS_INSTRUCTIONS, request.promptProfile(), request.preservation(), "analysis", false),
+                    request
             );
+            paceOutboundRequest();
             String body = restClient.post()
-                    .uri("/responses")
+                    .uri(providerUri())
                     .header(HttpHeaders.AUTHORIZATION, "Bearer " + properties.apiKey())
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(payload)
@@ -146,7 +151,7 @@ public class OpenAiCompatibleProvider implements AiTranslationProvider {
             throw new FanbookException(
                     ErrorCode.PROVIDER_REQUEST_FAILED,
                     HttpStatus.BAD_GATEWAY,
-                    exception.getMessage()
+                    providerFailureMessage(exception)
             );
         } finally {
             semaphore.release();
@@ -158,13 +163,10 @@ public class OpenAiCompatibleProvider implements AiTranslationProvider {
         acquirePermit();
         try {
             String resolvedModelName = modelName == null || modelName.isBlank() ? properties.model() : modelName;
-            Map<String, Object> payload = Map.of(
-                    "model", resolvedModelName,
-                    "instructions", instructions,
-                    "input", objectMapper.writeValueAsString(request)
-            );
+            Map<String, Object> payload = payload(resolvedModelName, instructions, request);
+            paceOutboundRequest();
             String body = restClient.post()
-                    .uri("/responses")
+                    .uri(providerUri())
                     .header(HttpHeaders.AUTHORIZATION, "Bearer " + properties.apiKey())
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(payload)
@@ -178,11 +180,47 @@ public class OpenAiCompatibleProvider implements AiTranslationProvider {
             throw new FanbookException(
                     ErrorCode.PROVIDER_REQUEST_FAILED,
                     HttpStatus.BAD_GATEWAY,
-                    exception.getMessage()
+                    providerFailureMessage(exception)
             );
         } finally {
             semaphore.release();
         }
+    }
+
+    private Map<String, Object> payload(String resolvedModelName, String instructions, Object request) throws Exception {
+        if (properties.usesChatCompletions()) {
+            return chatCompletionsPayload(resolvedModelName, instructions, request);
+        }
+        return Map.of(
+                "model", resolvedModelName,
+                "instructions", instructions,
+                "input", objectMapper.writeValueAsString(request)
+        );
+    }
+
+    private Map<String, Object> chatCompletionsPayload(String resolvedModelName, String instructions, Object request) throws Exception {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("model", resolvedModelName);
+        payload.put("messages", List.of(
+                Map.of("role", "system", "content", instructions),
+                Map.of("role", "user", "content", objectMapper.writeValueAsString(request))
+        ));
+        if (properties.jsonMode()) {
+            payload.put("response_format", Map.of("type", "json_object"));
+        }
+        if (!properties.thinkingMode().isBlank()) {
+            payload.put("thinking", Map.of("type", properties.thinkingMode()));
+        }
+        return payload;
+    }
+
+    private String providerUri() {
+        if (!properties.usesChatCompletions()) {
+            return "/responses";
+        }
+        return properties.baseUrl().toLowerCase().endsWith("/chat/completions")
+                ? ""
+                : "/chat/completions";
     }
 
     private static String instructions(
@@ -295,6 +333,14 @@ public class OpenAiCompatibleProvider implements AiTranslationProvider {
             return directOutputText.asText();
         }
 
+        JsonNode choices = root.path("choices");
+        if (choices.isArray() && !choices.isEmpty()) {
+            JsonNode content = choices.get(0).path("message").get("content");
+            if (content != null && content.isTextual()) {
+                return content.asText();
+            }
+        }
+
         JsonNode output = root.path("output");
         if (output.isArray()) {
             for (JsonNode item : output) {
@@ -317,6 +363,31 @@ public class OpenAiCompatibleProvider implements AiTranslationProvider {
         );
     }
 
+    private void paceOutboundRequest() {
+        long intervalMillis = properties.minRequestInterval().toMillis();
+        if (intervalMillis <= 0) {
+            return;
+        }
+        synchronized (requestPaceMonitor) {
+            long now = System.currentTimeMillis();
+            long waitMillis = Math.max(0, nextRequestAtMillis - now);
+            if (waitMillis > 0) {
+                try {
+                    Thread.sleep(waitMillis);
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new FanbookException(
+                            ErrorCode.PROVIDER_REQUEST_FAILED,
+                            HttpStatus.INTERNAL_SERVER_ERROR,
+                            "Interrupted while pacing provider request."
+                    );
+                }
+                now = System.currentTimeMillis();
+            }
+            nextRequestAtMillis = now + intervalMillis;
+        }
+    }
+
     private static String trimTrailingSlash(String value) {
         if (value == null || value.isBlank()) {
             return "https://api.openai.com/v1";
@@ -329,5 +400,12 @@ public class OpenAiCompatibleProvider implements AiTranslationProvider {
         requestFactory.setConnectTimeout(properties.requestTimeout());
         requestFactory.setReadTimeout(properties.requestTimeout());
         return requestFactory;
+    }
+
+    private static String providerFailureMessage(Exception exception) {
+        if (exception instanceof RestClientResponseException responseException) {
+            return "Provider request failed with HTTP " + responseException.getStatusCode().value() + ".";
+        }
+        return "Provider request failed while parsing or processing the provider response.";
     }
 }

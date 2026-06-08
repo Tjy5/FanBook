@@ -6,6 +6,7 @@ import static org.hamcrest.Matchers.containsString;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.content;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withBadRequest;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 import com.fasterxml.jackson.databind.json.JsonMapper;
@@ -28,7 +29,7 @@ class OpenAiCompatibleProviderTest {
 
     @Test
     void configuresHttpRequestTimeoutsFromProperties() {
-        var requestFactory = OpenAiCompatibleProvider.requestFactory(new OpenAiCompatibleProperties(
+        var requestFactory = OpenAiCompatibleProvider.requestFactory(properties(
                 "https://fake.example/v1",
                 "test-key",
                 "gpt-test",
@@ -61,7 +62,7 @@ class OpenAiCompatibleProviderTest {
         OpenAiCompatibleProvider provider = new OpenAiCompatibleProvider(
                 builder,
                 JsonMapper.builder().build(),
-                new OpenAiCompatibleProperties(
+                properties(
                         "https://fake.example/v1",
                         "test-key",
                         "gpt-test",
@@ -101,7 +102,7 @@ class OpenAiCompatibleProviderTest {
         OpenAiCompatibleProvider provider = new OpenAiCompatibleProvider(
                 builder,
                 JsonMapper.builder().build(),
-                new OpenAiCompatibleProperties(
+                properties(
                         "https://fake.example/v1",
                         "test-key",
                         "gpt-test",
@@ -123,6 +124,148 @@ class OpenAiCompatibleProviderTest {
     }
 
     @Test
+    void sendsChatCompletionsJsonRequestWithThinkingDisabledWhenConfigured() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo("https://fake.example/v1/chat/completions"))
+                .andExpect(header("Authorization", "Bearer test-key"))
+                .andExpect(content().string(containsString("\"messages\"")))
+                .andExpect(content().string(containsString("Return JSON only with shape")))
+                .andExpect(content().string(containsString("\\\"sourceText\\\":\\\"Hello\\\"")))
+                .andExpect(content().string(containsString("\"response_format\":{\"type\":\"json_object\"}")))
+                .andExpect(content().string(containsString("\"thinking\":{\"type\":\"disabled\"}")))
+                .andRespond(withSuccess("""
+                        {
+                          "choices": [
+                            {
+                              "message": {
+                                "role": "assistant",
+                                "content": "{\\"items\\":[{\\"segmentId\\":1,\\"translatedText\\":\\"你好\\"}]}"
+                              },
+                              "finish_reason": "stop"
+                            }
+                          ]
+                        }
+                        """, MediaType.APPLICATION_JSON));
+        OpenAiCompatibleProvider provider = new OpenAiCompatibleProvider(
+                builder,
+                JsonMapper.builder().build(),
+                properties(
+                        "https://fake.example/v1/chat/completions",
+                        "test-key",
+                        "deepseek-v4-flash",
+                        Duration.ofSeconds(30),
+                        1,
+                        null,
+                        Duration.ZERO,
+                        "disabled",
+                        true
+                )
+        );
+
+        var result = provider.translateChunk(new StructuredTranslationRequest(
+                "en",
+                "zh",
+                "Demo Book",
+                "Chapter One",
+                List.of(new StructuredTranslationSourceItem(1L, "Hello"))
+        ));
+
+        assertThat(result.providerName()).isEqualTo("openai-compatible");
+        assertThat(result.modelName()).isEqualTo("deepseek-v4-flash");
+        assertThat(result.items().getFirst().translatedText()).isEqualTo("你好");
+        server.verify();
+    }
+
+    @Test
+    void appendsChatCompletionsPathWhenEndpointIsConfigured() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo("https://fake.example/v1/chat/completions"))
+                .andRespond(withSuccess("""
+                        {
+                          "choices": [
+                            {
+                              "message": {
+                                "role": "assistant",
+                                "content": "{\\"items\\":[{\\"segmentId\\":1,\\"translatedText\\":\\"你好\\"}]}"
+                              }
+                            }
+                          ]
+                        }
+                        """, MediaType.APPLICATION_JSON));
+        OpenAiCompatibleProvider provider = new OpenAiCompatibleProvider(
+                builder,
+                JsonMapper.builder().build(),
+                properties(
+                        "https://fake.example/v1",
+                        "test-key",
+                        "deepseek-v4-flash",
+                        Duration.ofSeconds(30),
+                        1,
+                        "chat-completions",
+                        Duration.ZERO,
+                        "disabled",
+                        true
+                )
+        );
+
+        provider.translateChunk(new StructuredTranslationRequest(
+                "en",
+                "zh",
+                "Demo Book",
+                "Chapter One",
+                List.of(new StructuredTranslationSourceItem(1L, "Hello"))
+        ));
+
+        server.verify();
+    }
+
+    @Test
+    void pacesOutboundRequestsWhenMinimumIntervalIsConfigured() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo("https://fake.example/v1/responses"))
+                .andRespond(withSuccess("""
+                        {"output_text":"{\\"items\\":[{\\"segmentId\\":1,\\"translatedText\\":\\"你好\\"}]}"}}
+                        """, MediaType.APPLICATION_JSON));
+        server.expect(requestTo("https://fake.example/v1/responses"))
+                .andRespond(withSuccess("""
+                        {"output_text":"{\\"items\\":[{\\"segmentId\\":1,\\"translatedText\\":\\"你好\\"}]}"}}
+                        """, MediaType.APPLICATION_JSON));
+        OpenAiCompatibleProvider provider = new OpenAiCompatibleProvider(
+                builder,
+                JsonMapper.builder().build(),
+                properties(
+                        "https://fake.example/v1",
+                        "test-key",
+                        "gpt-test",
+                        Duration.ofSeconds(30),
+                        1,
+                        null,
+                        Duration.ofMillis(50),
+                        null,
+                        true
+                )
+        );
+        StructuredTranslationRequest request = new StructuredTranslationRequest(
+                "en",
+                "zh",
+                "Demo Book",
+                "Chapter One",
+                List.of(new StructuredTranslationSourceItem(1L, "Hello"))
+        );
+
+        long started = System.nanoTime();
+        provider.translateChunk(request);
+        provider.translateChunk(request);
+        long elapsedMillis = Duration.ofNanos(System.nanoTime() - started).toMillis();
+
+        assertThat(elapsedMillis).isGreaterThanOrEqualTo(45);
+        server.verify();
+    }
+
+    @Test
     void sendsInlinePlaceholderRulesOnlyWhenRequestContainsPlaceholderTokens() {
         RestClient.Builder builder = RestClient.builder();
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
@@ -137,7 +280,7 @@ class OpenAiCompatibleProviderTest {
         OpenAiCompatibleProvider provider = new OpenAiCompatibleProvider(
                 builder,
                 JsonMapper.builder().build(),
-                new OpenAiCompatibleProperties(
+                properties(
                         "https://fake.example/v1",
                         "test-key",
                         "gpt-test",
@@ -175,7 +318,7 @@ class OpenAiCompatibleProviderTest {
         OpenAiCompatibleProvider provider = new OpenAiCompatibleProvider(
                 builder,
                 JsonMapper.builder().build(),
-                new OpenAiCompatibleProperties(
+                properties(
                         "https://fake.example/v1",
                         "test-key",
                         "gpt-test",
@@ -204,11 +347,44 @@ class OpenAiCompatibleProviderTest {
     }
 
     @Test
+    void redactsProviderResponseBodyFromRequestFailureMessages() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo("https://fake.example/v1/responses"))
+                .andRespond(withBadRequest()
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body("{\"error\":{\"message\":\"SECRET_SOURCE_TEXT\"}}"));
+        OpenAiCompatibleProvider provider = new OpenAiCompatibleProvider(
+                builder,
+                JsonMapper.builder().build(),
+                properties(
+                        "https://fake.example/v1",
+                        "test-key",
+                        "gpt-test",
+                        Duration.ofSeconds(30),
+                        2
+                )
+        );
+
+        assertThatThrownBy(() -> provider.translateChunk(new StructuredTranslationRequest(
+                "en",
+                "zh",
+                "Demo Book",
+                "Chapter One",
+                List.of(new StructuredTranslationSourceItem(1L, "Hello"))
+        )))
+                .isInstanceOf(FanbookException.class)
+                .hasMessageContaining("HTTP 400")
+                .hasMessageNotContaining("SECRET_SOURCE_TEXT");
+        server.verify();
+    }
+
+    @Test
     void rejectsMissingApiKey() {
         OpenAiCompatibleProvider provider = new OpenAiCompatibleProvider(
                 RestClient.builder(),
                 JsonMapper.builder().build(),
-                new OpenAiCompatibleProperties(
+                properties(
                         "https://fake.example/v1",
                         "",
                         "gpt-test",
@@ -226,5 +402,39 @@ class OpenAiCompatibleProviderTest {
         )))
                 .isInstanceOf(FanbookException.class)
                 .hasMessageContaining("API key");
+    }
+
+    private static OpenAiCompatibleProperties properties(
+            String baseUrl,
+            String apiKey,
+            String model,
+            Duration requestTimeout,
+            int maxConcurrency
+    ) {
+        return properties(baseUrl, apiKey, model, requestTimeout, maxConcurrency, null, Duration.ZERO, "", true);
+    }
+
+    private static OpenAiCompatibleProperties properties(
+            String baseUrl,
+            String apiKey,
+            String model,
+            Duration requestTimeout,
+            int maxConcurrency,
+            String endpoint,
+            Duration minRequestInterval,
+            String thinkingMode,
+            Boolean jsonMode
+    ) {
+        return new OpenAiCompatibleProperties(
+                baseUrl,
+                apiKey,
+                model,
+                requestTimeout,
+                maxConcurrency,
+                endpoint,
+                minRequestInterval,
+                thinkingMode,
+                jsonMode
+        );
     }
 }

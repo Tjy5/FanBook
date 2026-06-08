@@ -15,8 +15,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
-import javax.xml.XMLConstants;
-import javax.xml.parsers.DocumentBuilderFactory;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.stereotype.Component;
 import org.w3c.dom.Document;
@@ -70,7 +68,7 @@ public class EpubParser {
         Map<String, String> hrefById = new HashMap<>();
         for (int i = 0; i < items.getLength(); i++) {
             Element item = (Element) items.item(i);
-            if ("application/xhtml+xml".equals(item.getAttribute("media-type"))) {
+            if (isReadableSpineDocument(item.getAttribute("media-type"))) {
                 hrefById.put(item.getAttribute("id"), join(opfDir, item.getAttribute("href")));
             }
         }
@@ -301,15 +299,12 @@ public class EpubParser {
     }
 
     private static Document xml(byte[] content, String path) {
-        try {
-            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-            factory.setNamespaceAware(true);
-            factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
-            factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
-            return factory.newDocumentBuilder().parse(new ByteArrayInputStream(content));
-        } catch (Exception e) {
-            throw new EpubParserException("EPUB document '" + path + "' is not well-formed XML.", e);
-        }
+        return EpubXmlDocuments.parse(content, path);
+    }
+
+    private static boolean isReadableSpineDocument(String mediaType) {
+        String normalized = mediaType == null ? "" : mediaType.trim().toLowerCase(Locale.ROOT);
+        return "application/xhtml+xml".equals(normalized) || "text/html".equals(normalized);
     }
 
     private static String firstAttribute(Document doc, String localName, String attribute) {

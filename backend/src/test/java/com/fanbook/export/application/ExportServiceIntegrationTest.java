@@ -15,6 +15,7 @@ import com.fanbook.translation.domain.TranslationGlossaryCandidateEntity;
 import com.fanbook.translation.domain.TranslationGlossaryCandidateStatus;
 import com.fanbook.translation.infrastructure.TranslationGlossaryCandidateRepository;
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
@@ -129,6 +130,28 @@ class ExportServiceIntegrationTest {
         String chapter = unzipText(storageService.read(artifact.getObjectKey())).get("OEBPS/chapter1.xhtml");
         assertThat(chapter).contains("<p>Hello world.</p><p>[zh] Hello world.</p>");
         assertThat(chapter).contains("<p>Alice went to Wonderland.</p><p>[zh] Alice went to Wonderland.</p>");
+    }
+
+    @Test
+    void exportsHtmlSpineDocumentAfterTranslation() throws Exception {
+        var book = bookApplicationService.upload("html.epub", htmlSpineEpub("""
+                <h1>Chapter One</h1>
+                <p><img src="cover.png"></p>
+                <p>Hello <em>bright</em> world.</p>
+                """), "en");
+        var job = translationJobService.startWithoutDispatch(
+                book.bookId(),
+                new StartTranslationRequest("mock", "mock-translator"),
+                "system"
+        );
+        translationJobExecutor.runJob(job.jobId());
+
+        var artifact = exportService.exportZh(book.bookId());
+
+        String chapter = unzipText(storageService.read(artifact.getObjectKey())).get("chapter.html");
+        assertThat(chapter).contains("[zh] Hello ");
+        assertThat(chapter).contains("<em>bright</em>");
+        assertThat(chapter).doesNotContain("[id0]");
     }
 
     @Test
@@ -291,6 +314,57 @@ class ExportServiceIntegrationTest {
 
     private static String longParagraph() {
         return "This sentence gives the parser a natural boundary for semantic splitting. ".repeat(80).trim();
+    }
+
+    private static byte[] htmlSpineEpub(String bodyContent) {
+        try {
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            try (java.util.zip.ZipOutputStream zip = new java.util.zip.ZipOutputStream(output, StandardCharsets.UTF_8)) {
+                entry(zip, "META-INF/container.xml", """
+                        <?xml version="1.0" encoding="UTF-8"?>
+                        <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+                          <rootfiles>
+                            <rootfile full-path="content.opf" media-type="application/oebps-package+xml"/>
+                          </rootfiles>
+                        </container>
+                        """);
+                entry(zip, "content.opf", """
+                        <?xml version="1.0" encoding="UTF-8"?>
+                        <package version="2.0" xmlns="http://www.idpf.org/2007/opf">
+                          <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+                            <dc:title>HTML Demo</dc:title>
+                          </metadata>
+                          <manifest>
+                            <item id="chapter" href="chapter.html" media-type="text/html"/>
+                          </manifest>
+                          <spine>
+                            <itemref idref="chapter"/>
+                          </spine>
+                        </package>
+                        """);
+                entry(zip, "chapter.html", """
+                        <!DOCTYPE html>
+                        <html>
+                          <head>
+                            <meta charset="UTF-8">
+                            <link href="book.css" rel="stylesheet" type="text/css">
+                          </head>
+                          <body>
+                            %s
+                          </body>
+                        </html>
+                        """.formatted(bodyContent));
+            }
+            return output.toByteArray();
+        } catch (Exception exception) {
+            throw new IllegalStateException(exception);
+        }
+    }
+
+    private static void entry(java.util.zip.ZipOutputStream zip, String name, String content) throws Exception {
+        zip.putNextEntry(new ZipEntry(name));
+        zip.write(content.getBytes(StandardCharsets.UTF_8));
+        zip.closeEntry();
     }
 
     @TestConfiguration

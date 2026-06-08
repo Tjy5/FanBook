@@ -20,5 +20,13 @@ fanbook:
   storage:
     root: ${FANBOOK_LOCAL_STORAGE_ROOT:./runtime/local/storage}
   ai:
-    provider: mock
-    model: mock-translator
+    provider: ${FANBOOK_AI_PROVIDER:mock}
+    base-url: ${FANBOOK_AI_BASE_URL:https://api.openai.com/v1}
+    api-key: ${FANBOOK_AI_API_KEY:}
+    model: ${FANBOOK_AI_MODEL:mock-translator}
+    request-timeout: ${FANBOOK_AI_REQUEST_TIMEOUT:90s}
+    max-concurrency: ${FANBOOK_AI_MAX_CONCURRENCY:2}
+    endpoint: ${FANBOOK_AI_ENDPOINT:}
+    min-request-interval: ${FANBOOK_AI_MIN_REQUEST_INTERVAL:0s}
+    thinking-mode: ${FANBOOK_AI_THINKING_MODE:}
+    json-mode: ${FANBOOK_AI_JSON_MODE:true}

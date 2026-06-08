@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -31,6 +32,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class TranslationChunkWorker {
+
+    private static final Pattern LETTER_OR_NUMBER = Pattern.compile("[\\p{L}\\p{N}]");
 
     private final TranslationChunkRepository chunkRepository;
     private final SegmentRepository segmentRepository;
@@ -80,7 +83,15 @@ public class TranslationChunkWorker {
                         } else {
                             missSegments.add(segment);
                         }
-                    }, () -> missSegments.add(segment));
+                    }, () -> {
+                        if (shouldPreserveSourceWithoutProvider(segment)) {
+                            String translated = SegmentInlineMarkup.providerSourceText(segment);
+                            segment.markTranslated(translated);
+                            cacheService.store(segment, chunk.getJob(), snapshot.targetLanguage(), cachePromptVersion, translated);
+                        } else {
+                            missSegments.add(segment);
+                        }
+                    });
         }
 
         if (!missSegments.isEmpty()) {
@@ -235,5 +246,14 @@ public class TranslationChunkWorker {
 
     private static boolean hasValidInlinePlaceholders(SegmentEntity segment, String translated) {
         return SegmentInlineMarkup.validateTranslatedText(translated, segment.getLocatorJson()).valid();
+    }
+
+    private static boolean shouldPreserveSourceWithoutProvider(SegmentEntity segment) {
+        String source = SegmentInlineMarkup.providerSourceText(segment);
+        if (source == null || source.isBlank()) {
+            return false;
+        }
+        return !LETTER_OR_NUMBER.matcher(source).find()
+                && SegmentInlineMarkup.validateTranslatedText(source, segment.getLocatorJson()).valid();
     }
 }

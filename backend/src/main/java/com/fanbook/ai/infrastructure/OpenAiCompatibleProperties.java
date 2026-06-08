@@ -9,7 +9,11 @@ public record OpenAiCompatibleProperties(
         String apiKey,
         String model,
         Duration requestTimeout,
-        int maxConcurrency
+        int maxConcurrency,
+        String endpoint,
+        Duration minRequestInterval,
+        String thinkingMode,
+        Boolean jsonMode
 ) {
     public OpenAiCompatibleProperties {
         if (baseUrl == null || baseUrl.isBlank()) {
@@ -24,5 +28,28 @@ public record OpenAiCompatibleProperties(
         if (maxConcurrency < 1) {
             maxConcurrency = 1;
         }
+        if (endpoint == null || endpoint.isBlank()) {
+            endpoint = isChatCompletionsUrl(baseUrl) ? "chat-completions" : "responses";
+        }
+        if (minRequestInterval == null || minRequestInterval.isNegative()) {
+            minRequestInterval = Duration.ZERO;
+        }
+        if (thinkingMode == null) {
+            thinkingMode = "";
+        } else {
+            thinkingMode = thinkingMode.trim();
+        }
+        if (jsonMode == null) {
+            jsonMode = true;
+        }
+    }
+
+    public boolean usesChatCompletions() {
+        return "chat-completions".equalsIgnoreCase(endpoint)
+                || isChatCompletionsUrl(baseUrl);
+    }
+
+    private static boolean isChatCompletionsUrl(String value) {
+        return value != null && value.toLowerCase().endsWith("/chat/completions");
     }
 }

@@ -70,8 +70,8 @@ fanbook:
       retry-queue: translation.chunk.retry
       dead-letter-queue: translation.chunk.dlq
       routing-key: translation.chunk
-      prefetch: 2
-      concurrency: 4
+      prefetch: ${FANBOOK_TRANSLATION_MESSAGING_PREFETCH:2}
+      concurrency: ${FANBOOK_TRANSLATION_MESSAGING_CONCURRENCY:4}
       listener-auto-startup: ${FANBOOK_TRANSLATION_LISTENER_AUTO_STARTUP:true}
     recovery:
       chunk-lease: 10m
@@ -88,5 +88,9 @@ fanbook:
     base-url: ${FANBOOK_AI_BASE_URL:https://api.openai.com/v1}
     api-key: ${FANBOOK_AI_API_KEY:}
     model: ${FANBOOK_AI_MODEL:mock-translator}
-    request-timeout: 90s
-    max-concurrency: 2
+    request-timeout: ${FANBOOK_AI_REQUEST_TIMEOUT:90s}
+    max-concurrency: ${FANBOOK_AI_MAX_CONCURRENCY:2}
+    endpoint: ${FANBOOK_AI_ENDPOINT:}
+    min-request-interval: ${FANBOOK_AI_MIN_REQUEST_INTERVAL:0s}
+    thinking-mode: ${FANBOOK_AI_THINKING_MODE:}
+    json-mode: ${FANBOOK_AI_JSON_MODE:true}
