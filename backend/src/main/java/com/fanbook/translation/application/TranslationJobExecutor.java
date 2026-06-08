@@ -1,22 +1,8 @@
 package com.fanbook.translation.application;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.json.JsonMapper;
-import com.fanbook.ai.application.StructuredTranslationValidator;
-import com.fanbook.ai.domain.AiTranslationProvider;
-import com.fanbook.ai.domain.StructuredTranslationGlossaryItem;
-import com.fanbook.ai.domain.StructuredTranslationItem;
-import com.fanbook.ai.domain.StructuredTranslationRequest;
-import com.fanbook.ai.domain.StructuredTranslationSourceItem;
-import com.fanbook.book.application.SegmentInlineMarkup;
-import com.fanbook.book.domain.SegmentEntity;
-import com.fanbook.book.domain.SegmentStatus;
-import com.fanbook.book.infrastructure.SegmentRepository;
 import com.fanbook.common.error.ErrorCode;
 import com.fanbook.common.error.FanbookException;
 import com.fanbook.common.lock.BookTranslationLock;
-import com.fanbook.translation.config.TranslationChunkPlanningProperties;
 import com.fanbook.translation.domain.TranslationChunkEntity;
 import com.fanbook.translation.domain.TranslationChunkStatus;
 import com.fanbook.translation.domain.TranslationJobEntity;
@@ -25,9 +11,6 @@ import com.fanbook.translation.infrastructure.TranslationChunkRepository;
 import com.fanbook.translation.infrastructure.TranslationJobRepository;
 import java.time.OffsetDateTime;
 import java.util.List;
-import java.util.Map;
-import java.util.function.Function;
-import java.util.stream.Collectors;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -38,41 +21,30 @@ public class TranslationJobExecutor {
 
     private final TranslationJobRepository jobRepository;
     private final TranslationChunkRepository chunkRepository;
-    private final SegmentRepository segmentRepository;
-    private final AiTranslationProvider provider;
-    private final StructuredTranslationValidator validator;
+    private final TranslationChunkWorker worker;
+    private final TranslationChunkStateService stateService;
+    private final TranslationJobAggregator aggregator;
     private final BookTranslationLock lock;
     private final TransactionTemplate transactionTemplate;
     private final int maxAttemptsPerChunk;
-    private final TranslationChunkPlanningProperties chunkPlanningProperties;
-    private final TranslationRuleSnapshotService ruleSnapshotService;
-    private final TranslationTextProtector textProtector;
-    private final TranslationGlossaryBuilder glossaryBuilder = new TranslationGlossaryBuilder();
-    private final ObjectMapper objectMapper = JsonMapper.builder().build();
 
     public TranslationJobExecutor(
             TranslationJobRepository jobRepository,
             TranslationChunkRepository chunkRepository,
-            SegmentRepository segmentRepository,
-            AiTranslationProvider provider,
-            StructuredTranslationValidator validator,
+            TranslationChunkWorker worker,
+            TranslationChunkStateService stateService,
+            TranslationJobAggregator aggregator,
             BookTranslationLock lock,
             TransactionTemplate transactionTemplate,
-            TranslationChunkPlanningProperties chunkPlanningProperties,
-            TranslationRuleSnapshotService ruleSnapshotService,
-            TranslationTextProtector textProtector,
             @Value("${fanbook.translation.max-attempts-per-chunk:3}") int maxAttemptsPerChunk
     ) {
         this.jobRepository = jobRepository;
         this.chunkRepository = chunkRepository;
-        this.segmentRepository = segmentRepository;
-        this.provider = provider;
-        this.validator = validator;
+        this.worker = worker;
+        this.stateService = stateService;
+        this.aggregator = aggregator;
         this.lock = lock;
         this.transactionTemplate = transactionTemplate;
-        this.chunkPlanningProperties = chunkPlanningProperties;
-        this.ruleSnapshotService = ruleSnapshotService;
-        this.textProtector = textProtector;
         this.maxAttemptsPerChunk = maxAttemptsPerChunk;
     }
 
@@ -88,11 +60,13 @@ public class TranslationJobExecutor {
 
             markRunning(jobId);
             while (!isCanceled(jobId)) {
-                TranslationChunkEntity chunk = takeNextChunk(jobId);
-                if (chunk == null) {
+                Long chunkId = takeNextChunkId(jobId);
+                if (chunkId == null) {
                     break;
                 }
-                executeChunk(jobId, chunk);
+                if (!executeChunk(jobId, chunkId)) {
+                    return;
+                }
             }
             completeIfStillRunning(jobId);
         } catch (RuntimeException exception) {
@@ -113,7 +87,7 @@ public class TranslationJobExecutor {
         transactionTemplate.executeWithoutResult(status -> requireJob(jobId).markRunning(OffsetDateTime.now()));
     }
 
-    private TranslationChunkEntity takeNextChunk(Long jobId) {
+    private Long takeNextChunkId(Long jobId) {
         return transactionTemplate.execute(status -> {
             List<TranslationChunkEntity> candidates = chunkRepository.findByJobIdAndStatusInOrderByChunkOrderAsc(
                     jobId,
@@ -129,97 +103,24 @@ public class TranslationJobExecutor {
                     requireJob(jobId).markFailed(message, OffsetDateTime.now());
                     return null;
                 }
-                chunk.markRunning(OffsetDateTime.now());
-                return chunk;
+                return chunk.getId();
             }
             return null;
         });
     }
 
-    private void executeChunk(Long jobId, TranslationChunkEntity chunk) {
-        try {
-            ChunkWork work = buildChunkWork(chunk);
-            var result = provider.translateChunk(work.request());
-            validator.validate(work.segmentIds(), result);
-            transactionTemplate.executeWithoutResult(status -> {
-                Map<Long, String> translatedById = result.items().stream()
-                        .collect(Collectors.toMap(StructuredTranslationItem::segmentId, StructuredTranslationItem::translatedText));
-                for (SegmentEntity segment : segmentRepository.findAllById(work.segmentIds())) {
-                    String translated = textProtector.postProcess(translatedById.get(segment.getId()));
-                    validateInlinePlaceholders(segment, translated);
-                    segment.markTranslated(translated);
-                }
-                TranslationChunkEntity managedChunk = chunkRepository.findById(chunk.getId())
-                        .orElseThrow(() -> notFound("Translation chunk '" + chunk.getId() + "' was not found."));
-                managedChunk.markCompleted(OffsetDateTime.now());
-                refreshProgress(jobId);
-            });
-        } catch (RuntimeException exception) {
-            markChunkFailed(chunk.getId(), codeValue(exception), exception.getMessage());
+    private boolean executeChunk(Long jobId, Long chunkId) {
+        if (!stateService.tryAcquire(chunkId, "executor-" + jobId)) {
+            return false;
         }
-    }
-
-    private ChunkWork buildChunkWork(TranslationChunkEntity chunk) {
-        List<Long> segmentIds = parseSegmentIds(chunk.getSegmentIdsJson());
-        return transactionTemplate.execute(status -> {
-            TranslationChunkEntity managedChunk = chunkRepository.findById(chunk.getId())
-                    .orElseThrow(() -> notFound("Translation chunk '" + chunk.getId() + "' was not found."));
-            List<SegmentEntity> segments = segmentRepository.findAllById(segmentIds);
-            Map<Long, SegmentEntity> segmentById = segments.stream()
-                    .collect(Collectors.toMap(SegmentEntity::getId, Function.identity()));
-            TranslationRuleSnapshotData snapshot = ruleSnapshotService.dataForJob(managedChunk.getJob());
-            List<StructuredTranslationSourceItem> items = segmentIds.stream()
-                    .map(id -> {
-                        SegmentEntity segment = segmentById.get(id);
-                        if (segment == null) {
-                            throw new FanbookException(
-                                    ErrorCode.STRUCTURED_OUTPUT_INVALID,
-                                    HttpStatus.INTERNAL_SERVER_ERROR,
-                                    "Missing segment '" + id + "' for translation chunk '" + chunk.getId() + "'."
-                            );
-                        }
-                        return new StructuredTranslationSourceItem(id, SegmentInlineMarkup.providerSourceText(segment));
-                    })
-                    .toList();
-            SegmentEntity first = segmentById.get(segmentIds.getFirst());
-            List<StructuredTranslationGlossaryItem> glossary = glossaryBuilder.build(
-                    snapshot.glossary(),
-                    requestTexts(first, items),
-                    chunkPlanningProperties.glossaryCandidateLimit()
-            );
-            return new ChunkWork(
-                    segmentIds,
-                    new StructuredTranslationRequest(
-                            first.getBook().getSourceLanguage(),
-                            snapshot.targetLanguage(),
-                            first.getBook().getTitle(),
-                            first.getChapter().getTitle(),
-                            snapshot.promptProfile(),
-                            snapshot.preservation(),
-                            List.of(),
-                            glossary,
-                            items
-                    )
-            );
-        });
-    }
-
-    private static List<String> requestTexts(SegmentEntity first, List<StructuredTranslationSourceItem> items) {
-        List<String> texts = new java.util.ArrayList<>();
-        texts.add(first.getBook().getTitle());
-        texts.add(first.getChapter().getTitle());
-        items.forEach(item -> texts.add(item.sourceText()));
-        return texts;
-    }
-
-    private void refreshProgress(Long jobId) {
-        TranslationJobEntity job = requireJob(jobId);
-        List<SegmentEntity> segments = segmentRepository.findByBookIdOrderByChapterIdAscSegmentOrderAsc(job.getBook().getId());
-        int translated = (int) segments.stream().filter(segment -> segment.getStatus() == SegmentStatus.TRANSLATED).count();
-        int failed = (int) segments.stream().filter(segment -> segment.getStatus() == SegmentStatus.FAILED).count();
-        int total = segments.size();
-        double progress = total == 0 ? 0 : (double) (translated + failed) / total;
-        job.updateProgress(total, translated, failed, progress);
+        try {
+            worker.execute(chunkId);
+            stateService.markCompleted(chunkId);
+            aggregator.aggregate(jobId);
+        } catch (RuntimeException exception) {
+            markChunkFailed(chunkId, codeValue(exception), exception.getMessage());
+        }
+        return true;
     }
 
     private void completeIfStillRunning(Long jobId) {
@@ -252,19 +153,6 @@ public class TranslationJobExecutor {
                 .orElseThrow(() -> notFound("Translation job '" + jobId + "' was not found."));
     }
 
-    private List<Long> parseSegmentIds(String segmentIdsJson) {
-        try {
-            return objectMapper.readValue(segmentIdsJson, new TypeReference<List<Long>>() {
-            });
-        } catch (Exception exception) {
-            throw new FanbookException(
-                    ErrorCode.STRUCTURED_OUTPUT_INVALID,
-                    HttpStatus.INTERNAL_SERVER_ERROR,
-                    "Invalid chunk segment id JSON."
-            );
-        }
-    }
-
     private static String codeValue(RuntimeException exception) {
         if (exception instanceof FanbookException fanbookException) {
             return fanbookException.code().value();
@@ -274,22 +162,5 @@ public class TranslationJobExecutor {
 
     private FanbookException notFound(String message) {
         return new FanbookException(ErrorCode.TRANSLATION_JOB_NOT_FOUND, HttpStatus.NOT_FOUND, message);
-    }
-
-    private static void validateInlinePlaceholders(SegmentEntity segment, String translated) {
-        SegmentInlineMarkup.PlaceholderValidation validation = SegmentInlineMarkup.validateTranslatedText(
-                translated,
-                segment.getLocatorJson()
-        );
-        if (!validation.valid()) {
-            throw new FanbookException(
-                    ErrorCode.STRUCTURED_OUTPUT_INVALID,
-                    HttpStatus.BAD_GATEWAY,
-                    "Inline placeholder validation failed for segment '" + segment.getId() + "': " + validation.message()
-            );
-        }
-    }
-
-    private record ChunkWork(List<Long> segmentIds, StructuredTranslationRequest request) {
     }
 }

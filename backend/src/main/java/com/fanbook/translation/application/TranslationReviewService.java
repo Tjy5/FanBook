@@ -107,7 +107,8 @@ public class TranslationReviewService {
             );
         }
         List<SegmentEntity> segments = segmentRepository.findByBookIdOrderByChapterIdAscSegmentOrderAsc(bookId);
-        var analysis = qualityAnalyzer.analyze(segments, chunkPlanningProperties.glossary());
+        TranslationRuleSnapshotData snapshot = ruleSnapshotService.dataForBook(managedBook);
+        var analysis = qualityAnalyzer.analyze(segments, snapshot.glossary(), snapshot.preservation());
         Map<Long, TranslationQualityAnalyzer.SegmentQualityScore> scoreBySegmentId = analysis.segmentScores().stream()
                 .collect(Collectors.toMap(TranslationQualityAnalyzer.SegmentQualityScore::segmentId, Function.identity()));
         List<ReviewCandidate> candidates = segments.stream()
@@ -135,8 +136,7 @@ public class TranslationReviewService {
                         candidate.warnings()
                 ))
                 .toList();
-        List<StructuredTranslationGlossaryItem> glossary = glossary(managedBook, items);
-        TranslationRuleSnapshotData snapshot = ruleSnapshotService.dataForBook(managedBook);
+        List<StructuredTranslationGlossaryItem> glossary = glossary(managedBook, items, snapshot);
         StructuredTranslationReviewRequest providerRequest = new StructuredTranslationReviewRequest(
                 managedBook.getSourceLanguage(),
                 snapshot.targetLanguage(),
@@ -165,7 +165,11 @@ public class TranslationReviewService {
         return response(bookId, options, candidates.size(), selected, selectedIds, updatedById);
     }
 
-    private List<StructuredTranslationGlossaryItem> glossary(BookEntity book, List<StructuredTranslationReviewItem> items) {
+    private List<StructuredTranslationGlossaryItem> glossary(
+            BookEntity book,
+            List<StructuredTranslationReviewItem> items,
+            TranslationRuleSnapshotData snapshot
+    ) {
         List<String> texts = new ArrayList<>();
         texts.add(book.getTitle());
         items.forEach(item -> {
@@ -173,7 +177,7 @@ public class TranslationReviewService {
             texts.add(item.translatedText());
         });
         return glossaryBuilder.build(
-                ruleSnapshotService.dataForBook(book).glossary(),
+                snapshot.glossary(),
                 texts,
                 chunkPlanningProperties.glossaryCandidateLimit()
         );

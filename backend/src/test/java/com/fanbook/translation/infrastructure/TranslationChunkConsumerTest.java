@@ -23,6 +23,9 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @SpringBootTest
 class TranslationChunkConsumerTest {
@@ -62,6 +65,9 @@ class TranslationChunkConsumerTest {
 
     @Autowired
     FakeTranslationChunkPublisher publisher;
+
+    @Autowired
+    PlatformTransactionManager transactionManager;
 
     @BeforeEach
     void clearPublisher() {
@@ -112,6 +118,27 @@ class TranslationChunkConsumerTest {
                 .isEqualTo(TranslationChunkStatus.FAILED);
         assertThat(publisher.messages())
                 .anySatisfy(message -> assertThat(message.dispatchReason()).isEqualTo("RETRY"));
+    }
+
+    @Test
+    void failedJobMessageIsAckedWithoutPaidProviderRetry() {
+        var book = bookApplicationService.upload("demo.epub", MinimalEpubFactory.create(), "en");
+        var job = translationJobService.startWithoutDispatch(
+                book.bookId(),
+                new StartTranslationRequest("missing", "mock-translator"),
+                "system"
+        );
+        var jobEntity = jobRepository.findById(job.jobId()).orElseThrow();
+        jobEntity.markFailed("previous chunk exhausted retry budget", java.time.OffsetDateTime.now());
+        jobRepository.saveAndFlush(jobEntity);
+        var chunk = chunkRepository.findByJobIdOrderByChunkOrderAsc(job.jobId()).getFirst();
+
+        var action = consumer.handleForTest(ChunkMessage.start(job.jobId(), chunk.getId()));
+
+        assertThat(action).isEqualTo(ChunkDeliveryAction.ACK);
+        assertThat(chunkRepository.findById(chunk.getId()).orElseThrow().getStatus())
+                .isEqualTo(TranslationChunkStatus.PENDING);
+        assertThat(publisher.messages()).isEmpty();
     }
 
     @Test
@@ -173,6 +200,18 @@ class TranslationChunkConsumerTest {
         chunk.markRunning(java.time.OffsetDateTime.now());
         chunk.markFailed("provider_not_found", "missing", java.time.OffsetDateTime.now());
         chunkRepository.saveAndFlush(chunk);
+        TransactionTemplate committedRead = new TransactionTemplate(transactionManager);
+        committedRead.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        publisher.onPublish(message -> committedRead.execute(status -> {
+            assertThat(chunkRepository.findById(message.chunkId()))
+                    .isPresent()
+                    .get()
+                    .satisfies(publishedChunk -> {
+                        assertThat(publishedChunk.getStatus()).isEqualTo(TranslationChunkStatus.PENDING);
+                        assertThat(publishedChunk.getParentChunk().getId()).isEqualTo(chunk.getId());
+                    });
+            return null;
+        }));
 
         var action = consumer.handleForTest(new ChunkMessage(
                 "1.0",

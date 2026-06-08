@@ -3,6 +3,7 @@ package com.fanbook.export.application;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fanbook.book.application.BookApplicationService;
+import com.fanbook.book.infrastructure.SegmentRepository;
 import com.fanbook.common.lock.BookTranslationLock;
 import com.fanbook.common.storage.StorageService;
 import com.fanbook.export.domain.ExportArtifactKind;
@@ -10,6 +11,9 @@ import com.fanbook.testsupport.MinimalEpubFactory;
 import com.fanbook.translation.api.StartTranslationRequest;
 import com.fanbook.translation.application.TranslationJobExecutor;
 import com.fanbook.translation.application.TranslationJobService;
+import com.fanbook.translation.domain.TranslationGlossaryCandidateEntity;
+import com.fanbook.translation.domain.TranslationGlossaryCandidateStatus;
+import com.fanbook.translation.infrastructure.TranslationGlossaryCandidateRepository;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
@@ -59,6 +63,12 @@ class ExportServiceIntegrationTest {
 
     @Autowired
     StorageService storageService;
+
+    @Autowired
+    SegmentRepository segmentRepository;
+
+    @Autowired
+    TranslationGlossaryCandidateRepository glossaryCandidateRepository;
 
     @Test
     void exportsTranslatedBookAfterMockTranslation() throws Exception {
@@ -211,6 +221,38 @@ class ExportServiceIntegrationTest {
         assertThat(json).contains("\"source_repeated_in_translation\"");
         assertThat(json).contains("\"english_residue\"");
         assertThat(json).contains("\"glossary_term_missing\"");
+    }
+
+    @Test
+    void generatesReportWarningsFromAcceptedGlossaryCandidates() {
+        var book = bookApplicationService.upload("accepted-glossary.epub", MinimalEpubFactory.create("""
+                <h1>Chapter One</h1>
+                <p>Wonderland shimmered softly.</p>
+                """), "en");
+        var job = translationJobService.startWithoutDispatch(
+                book.bookId(),
+                new StartTranslationRequest("mock", "mock-translator"),
+                "system"
+        );
+        translationJobExecutor.runJob(job.jobId());
+        var segments = segmentRepository.findByBookIdOrderByChapterIdAscSegmentOrderAsc(book.bookId());
+        glossaryCandidateRepository.saveAndFlush(new TranslationGlossaryCandidateEntity(
+                segments.getFirst().getBook(),
+                "Wonderland",
+                "wonderland",
+                "仙境",
+                "place",
+                "Accepted strict place name.",
+                TranslationGlossaryCandidateStatus.ACCEPTED,
+                1,
+                segments.get(1)
+        ));
+
+        var report = reportService.generateJson(book.bookId());
+
+        String json = new String(storageService.read(report.getObjectKey()), StandardCharsets.UTF_8);
+        assertThat(json).contains("\"glossary_term_missing\"");
+        assertThat(json).contains("Wonderland -> 仙境");
     }
 
     @Test

@@ -19,11 +19,26 @@ import com.fanbook.common.error.FanbookException;
 import java.time.Duration;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
 class OpenAiCompatibleProviderTest {
+
+    @Test
+    void configuresHttpRequestTimeoutsFromProperties() {
+        var requestFactory = OpenAiCompatibleProvider.requestFactory(new OpenAiCompatibleProperties(
+                "https://fake.example/v1",
+                "test-key",
+                "gpt-test",
+                Duration.ofSeconds(7),
+                2
+        ));
+
+        assertThat(ReflectionTestUtils.getField(requestFactory, "connectTimeout")).isEqualTo(7000);
+        assertThat(ReflectionTestUtils.getField(requestFactory, "readTimeout")).isEqualTo(7000);
+    }
 
     @Test
     void parsesStructuredResponseItemsFromOutputText() {

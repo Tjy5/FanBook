@@ -23,6 +23,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
@@ -69,7 +70,7 @@ public class OpenAiCompatibleProvider implements AiTranslationProvider {
 
     @Autowired
     public OpenAiCompatibleProvider(OpenAiCompatibleProperties properties) {
-        this(RestClient.builder(), JsonMapper.builder().build(), properties);
+        this(RestClient.builder(), JsonMapper.builder().build(), properties, true);
     }
 
     OpenAiCompatibleProvider(
@@ -77,7 +78,20 @@ public class OpenAiCompatibleProvider implements AiTranslationProvider {
             ObjectMapper objectMapper,
             OpenAiCompatibleProperties properties
     ) {
-        this.restClient = builder.baseUrl(trimTrailingSlash(properties.baseUrl())).build();
+        this(builder, objectMapper, properties, false);
+    }
+
+    OpenAiCompatibleProvider(
+            RestClient.Builder builder,
+            ObjectMapper objectMapper,
+            OpenAiCompatibleProperties properties,
+            boolean configureTimeouts
+    ) {
+        RestClient.Builder configuredBuilder = builder.baseUrl(trimTrailingSlash(properties.baseUrl()));
+        if (configureTimeouts) {
+            configuredBuilder = configuredBuilder.requestFactory(requestFactory(properties));
+        }
+        this.restClient = configuredBuilder.build();
         this.objectMapper = objectMapper;
         this.properties = properties;
         this.semaphore = new Semaphore(properties.maxConcurrency());
@@ -308,5 +322,12 @@ public class OpenAiCompatibleProvider implements AiTranslationProvider {
             return "https://api.openai.com/v1";
         }
         return value.endsWith("/") ? value.substring(0, value.length() - 1) : value;
+    }
+
+    static SimpleClientHttpRequestFactory requestFactory(OpenAiCompatibleProperties properties) {
+        SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
+        requestFactory.setConnectTimeout(properties.requestTimeout());
+        requestFactory.setReadTimeout(properties.requestTimeout());
+        return requestFactory;
     }
 }

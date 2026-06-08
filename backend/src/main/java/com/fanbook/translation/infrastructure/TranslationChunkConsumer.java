@@ -80,7 +80,7 @@ public class TranslationChunkConsumer {
     }
 
     public ChunkDeliveryAction handleForTest(ChunkMessage message) {
-        if (isCanceled(message.jobId())) {
+        if (!isProcessable(message.jobId())) {
             return ChunkDeliveryAction.ACK;
         }
         if (!stateService.tryAcquire(message.chunkId(), workerId())) {
@@ -100,9 +100,10 @@ public class TranslationChunkConsumer {
         }
     }
 
-    private boolean isCanceled(Long jobId) {
+    private boolean isProcessable(Long jobId) {
         return jobRepository.findById(jobId)
-                .map(job -> job.getStatus() == TranslationJobStatus.CANCELED)
+                .map(job -> job.getStatus() == TranslationJobStatus.QUEUED
+                        || job.getStatus() == TranslationJobStatus.RUNNING)
                 .orElse(false);
     }
 
@@ -144,14 +145,12 @@ public class TranslationChunkConsumer {
 
     private void degradeOrAggregateAfterRetryExhaustion(ChunkMessage message) {
         try {
-            afterCommitTransactionTemplate.executeWithoutResult(status -> {
-                var retryMessages = degradationService.degrade(message.chunkId());
-                if (!retryMessages.isEmpty()) {
-                    chunkPublisher.publishAll(retryMessages);
-                    return;
-                }
-                aggregator.aggregate(message.jobId());
-            });
+            var retryMessages = afterCommitTransactionTemplate.execute(status -> degradationService.degrade(message.chunkId()));
+            if (retryMessages != null && !retryMessages.isEmpty()) {
+                chunkPublisher.publishAll(retryMessages);
+                return;
+            }
+            afterCommitTransactionTemplate.executeWithoutResult(status -> aggregator.aggregate(message.jobId()));
         } catch (RuntimeException aggregateException) {
             log.error("Failed to aggregate translation job {} after retry exhaustion", message.jobId(), aggregateException);
         }

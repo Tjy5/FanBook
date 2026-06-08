@@ -20,6 +20,9 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @SpringBootTest
 class TranslationRecoveryServiceTest {
@@ -57,6 +60,12 @@ class TranslationRecoveryServiceTest {
     @Autowired
     FakeTranslationChunkPublisher publisher;
 
+    @Autowired
+    TransactionTemplate transactionTemplate;
+
+    @Autowired
+    PlatformTransactionManager transactionManager;
+
     @BeforeEach
     void clearPublisher() {
         publisher.clear();
@@ -69,9 +78,53 @@ class TranslationRecoveryServiceTest {
         stateService.tryAcquire(chunk.getId(), "worker-1");
         stateService.forceLeaseExpiredForTest(chunk.getId());
 
-        recoveryService.recoverStaleChunks();
+        transactionTemplate.executeWithoutResult(status -> {
+            recoveryService.recoverStaleChunks();
+            assertThat(publisher.messages()).isEmpty();
+        });
 
         assertThat(publisher.messages()).anySatisfy(message -> assertThat(message.dispatchReason()).isEqualTo("RECOVERY"));
+    }
+
+    @Test
+    void recoveryDegradesExhaustedMultiSegmentChunkAfterCommit() {
+        var job = createJobWithOneChunk();
+        var chunk = chunkRepository.findByJobIdOrderByChunkOrderAsc(job.jobId()).getFirst();
+        stateService.tryAcquire(chunk.getId(), "worker-1");
+        stateService.forceLeaseExpiredForTest(chunk.getId());
+        stateService.tryAcquire(chunk.getId(), "worker-2");
+        stateService.forceLeaseExpiredForTest(chunk.getId());
+        stateService.tryAcquire(chunk.getId(), "worker-3");
+        stateService.forceLeaseExpiredForTest(chunk.getId());
+
+        TransactionTemplate committedRead = new TransactionTemplate(transactionManager);
+        committedRead.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        publisher.onPublish(message -> committedRead.execute(status -> {
+            if (!message.dispatchReason().equals("START")) {
+                return null;
+            }
+            assertThat(chunkRepository.findById(message.chunkId()))
+                    .isPresent()
+                    .get()
+                    .satisfies(publishedChunk -> {
+                        assertThat(publishedChunk.getStatus()).isEqualTo(TranslationChunkStatus.PENDING);
+                        assertThat(publishedChunk.getParentChunk().getId()).isEqualTo(chunk.getId());
+                    });
+            return null;
+        }));
+
+        transactionTemplate.executeWithoutResult(status -> {
+            recoveryService.recoverStaleChunks();
+            assertThat(publisher.messages()).isEmpty();
+        });
+
+        assertThat(chunkRepository.findById(chunk.getId()).orElseThrow().getStatus())
+                .isEqualTo(TranslationChunkStatus.SUPERSEDED);
+        assertThat(jobRepository.findById(job.jobId()).orElseThrow().getStatus())
+                .isNotEqualTo(com.fanbook.translation.domain.TranslationJobStatus.FAILED);
+        assertThat(publisher.messages())
+                .filteredOn(message -> message.dispatchReason().equals("START"))
+                .hasSize(2);
     }
 
     @Test

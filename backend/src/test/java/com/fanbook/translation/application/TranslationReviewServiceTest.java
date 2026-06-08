@@ -14,8 +14,11 @@ import com.fanbook.testsupport.MinimalEpubFactory;
 import com.fanbook.translation.api.StartTranslationRequest;
 import com.fanbook.translation.api.TranslationReviewRequest;
 import com.fanbook.translation.domain.ActiveTranslationSessionEntity;
+import com.fanbook.translation.domain.TranslationGlossaryCandidateEntity;
+import com.fanbook.translation.domain.TranslationGlossaryCandidateStatus;
 import com.fanbook.translation.infrastructure.ActiveTranslationSessionRepository;
 import com.fanbook.translation.infrastructure.TranslationChunkRepository;
+import com.fanbook.translation.infrastructure.TranslationGlossaryCandidateRepository;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -62,6 +65,9 @@ class TranslationReviewServiceTest {
 
     @Autowired
     ActiveTranslationSessionRepository activeSessionRepository;
+
+    @Autowired
+    TranslationGlossaryCandidateRepository glossaryCandidateRepository;
 
     @Autowired
     CapturingReviewProvider provider;
@@ -129,6 +135,47 @@ class TranslationReviewServiceTest {
                 .isInstanceOf(FanbookException.class)
                 .hasMessageContaining("active translation");
         assertThat(job.status()).isEqualTo("QUEUED");
+    }
+
+    @Test
+    void previewUsesAcceptedGlossaryCandidatesWhenSelectingSegments() {
+        var book = bookApplicationService.upload("glossary.epub", MinimalEpubFactory.create("""
+                <h1>Chapter One</h1>
+                <p>Wonderland shimmered softly.</p>
+                """), "en");
+        var job = translationJobService.startWithoutDispatch(
+                book.bookId(),
+                new StartTranslationRequest("review-capture", "review-model"),
+                "system"
+        );
+        executor.runJob(job.jobId());
+        var segments = segmentRepository.findByBookIdOrderByChapterIdAscSegmentOrderAsc(book.bookId());
+        segments.get(1).markTranslated("这里没有使用固定地名。");
+        segmentRepository.saveAndFlush(segments.get(1));
+        glossaryCandidateRepository.saveAndFlush(new TranslationGlossaryCandidateEntity(
+                segments.getFirst().getBook(),
+                "Wonderland",
+                "wonderland",
+                "仙境",
+                "place",
+                "Accepted strict place name.",
+                TranslationGlossaryCandidateStatus.ACCEPTED,
+                1,
+                segments.get(1)
+        ));
+        provider.reset();
+        activeSessionRepository.deleteByJobId(job.jobId());
+
+        var response = reviewService.review(
+                segments.getFirst().getBook(),
+                new TranslationReviewRequest("review-capture", "review-model", 5, 80, List.of("glossary_term_missing"), false)
+        );
+
+        assertThat(response.applied()).isFalse();
+        assertThat(response.candidateSegments()).isEqualTo(1);
+        assertThat(response.selectedSegments()).isEqualTo(1);
+        assertThat(response.segments().getFirst().warnings()).contains("glossary_term_missing");
+        assertThat(provider.reviewCalls()).isZero();
     }
 
     private Long translatedBookWithRiskSegments() {

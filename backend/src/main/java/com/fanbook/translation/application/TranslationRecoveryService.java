@@ -7,10 +7,14 @@ import com.fanbook.translation.infrastructure.ActiveTranslationSessionRepository
 import com.fanbook.translation.infrastructure.TranslationChunkRepository;
 import com.fanbook.translation.infrastructure.TranslationJobRepository;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
+import java.util.List;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 @Service
 public class TranslationRecoveryService {
@@ -19,6 +23,7 @@ public class TranslationRecoveryService {
     private final TranslationJobRepository jobRepository;
     private final ActiveTranslationSessionRepository activeSessionRepository;
     private final TranslationChunkStateService stateService;
+    private final TranslationChunkDegradationService degradationService;
     private final TranslationJobAggregator aggregator;
     private final TranslationChunkPublisher chunkPublisher;
     private final int maxAttempts;
@@ -28,6 +33,7 @@ public class TranslationRecoveryService {
             TranslationJobRepository jobRepository,
             ActiveTranslationSessionRepository activeSessionRepository,
             TranslationChunkStateService stateService,
+            TranslationChunkDegradationService degradationService,
             TranslationJobAggregator aggregator,
             TranslationChunkPublisher chunkPublisher,
             @Value("${fanbook.translation.max-attempts-per-chunk:3}") int maxAttempts
@@ -36,6 +42,7 @@ public class TranslationRecoveryService {
         this.jobRepository = jobRepository;
         this.activeSessionRepository = activeSessionRepository;
         this.stateService = stateService;
+        this.degradationService = degradationService;
         this.aggregator = aggregator;
         this.chunkPublisher = chunkPublisher;
         this.maxAttempts = maxAttempts;
@@ -50,8 +57,14 @@ public class TranslationRecoveryService {
     @Transactional
     public void recoverStaleChunks() {
         OffsetDateTime now = OffsetDateTime.now();
+        List<ChunkMessage> recoveryMessages = new ArrayList<>();
         for (var chunk : chunkRepository.findByStatusAndLockedUntilBefore(TranslationChunkStatus.RUNNING, now)) {
             if (chunk.getAttemptCount() >= maxAttempts) {
+                List<ChunkMessage> degradedMessages = degradationService.degrade(chunk.getId());
+                if (!degradedMessages.isEmpty()) {
+                    recoveryMessages.addAll(degradedMessages);
+                    continue;
+                }
                 stateService.markFailed(
                         chunk.getId(),
                         ErrorCode.CHUNK_RETRY_EXHAUSTED.value(),
@@ -60,7 +73,7 @@ public class TranslationRecoveryService {
                 aggregator.aggregate(chunk.getJob().getId());
                 continue;
             }
-            chunkPublisher.publish(new ChunkMessage(
+            recoveryMessages.add(new ChunkMessage(
                     "1.0",
                     chunk.getJob().getId(),
                     chunk.getId(),
@@ -70,6 +83,7 @@ public class TranslationRecoveryService {
                     now
             ));
         }
+        publishAfterCommit(recoveryMessages);
     }
 
     @Transactional
@@ -79,5 +93,21 @@ public class TranslationRecoveryService {
                 activeSessionRepository.deleteByJobId(job.getId());
             }
         }
+    }
+
+    private void publishAfterCommit(List<ChunkMessage> messages) {
+        if (messages.isEmpty()) {
+            return;
+        }
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            chunkPublisher.publishAll(messages);
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                chunkPublisher.publishAll(messages);
+            }
+        });
     }
 }

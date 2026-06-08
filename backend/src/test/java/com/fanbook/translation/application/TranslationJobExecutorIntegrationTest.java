@@ -2,6 +2,9 @@ package com.fanbook.translation.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.fanbook.ai.domain.StructuredTranslationRequest;
+import com.fanbook.ai.domain.StructuredTranslationResult;
+import com.fanbook.ai.infrastructure.MockAiTranslationProvider;
 import com.fanbook.book.application.BookApplicationService;
 import com.fanbook.book.infrastructure.SegmentRepository;
 import com.fanbook.common.lock.BookTranslationLock;
@@ -12,8 +15,11 @@ import com.fanbook.translation.domain.TranslationJobStatus;
 import com.fanbook.translation.infrastructure.TranslationChunkRepository;
 import com.fanbook.translation.infrastructure.TranslationJobRepository;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -33,6 +39,8 @@ class TranslationJobExecutorIntegrationTest {
         registry.add("spring.jpa.database-platform", () -> "org.hibernate.dialect.H2Dialect");
         registry.add("fanbook.storage.root", () -> "target/translation-job-executor-storage");
         registry.add("fanbook.ai.provider", () -> "mock");
+        registry.add("fanbook.translation.max-segments-per-chunk", () -> 2);
+        registry.add("fanbook.translation.context-window-segments", () -> 2);
     }
 
     @Autowired
@@ -52,6 +60,14 @@ class TranslationJobExecutorIntegrationTest {
 
     @Autowired
     TranslationChunkRepository chunkRepository;
+
+    @Autowired
+    CapturingExecutorProvider provider;
+
+    @BeforeEach
+    void resetProvider() {
+        provider.reset();
+    }
 
     @Test
     void executesQueuedJobWithMockProvider() {
@@ -103,8 +119,41 @@ class TranslationJobExecutorIntegrationTest {
         assertThat(exhaustedChunk.getLastErrorCode()).isEqualTo("chunk_retry_exhausted");
     }
 
+    @Test
+    void executorUsesWorkerProviderModelContextAndCache() {
+        var book = bookApplicationService.upload("demo.epub", MinimalEpubFactory.create(), "en");
+        var job = translationJobService.startWithoutDispatch(
+                book.bookId(),
+                new StartTranslationRequest("executor-capture", "paid-model"),
+                "system"
+        );
+
+        executor.runJob(job.jobId());
+
+        assertThat(provider.modelNames()).containsOnly("paid-model");
+        assertThat(provider.requests()).hasSize(2);
+        assertThat(provider.requests().get(1).context())
+                .extracting(context -> context.sourceText())
+                .containsExactly("Chapter One", "Hello world.");
+
+        provider.reset();
+        var cachedJob = translationJobService.startWithoutDispatch(
+                book.bookId(),
+                new StartTranslationRequest("executor-capture", "paid-model"),
+                "system"
+        );
+        executor.runJob(cachedJob.jobId());
+
+        assertThat(provider.requests()).isEmpty();
+    }
+
     @TestConfiguration
     static class LockConfig {
+        @Bean
+        CapturingExecutorProvider capturingExecutorProvider() {
+            return new CapturingExecutorProvider();
+        }
+
         @Bean
         @Primary
         BookTranslationLock inMemoryBookTranslationLock() {
@@ -121,6 +170,36 @@ class TranslationJobExecutorIntegrationTest {
                     locks.remove(bookId, jobId);
                 }
             };
+        }
+    }
+
+    static class CapturingExecutorProvider extends MockAiTranslationProvider {
+        private final List<StructuredTranslationRequest> requests = new ArrayList<>();
+        private final List<String> modelNames = new ArrayList<>();
+
+        @Override
+        public String name() {
+            return "executor-capture";
+        }
+
+        @Override
+        public StructuredTranslationResult translateChunk(StructuredTranslationRequest request, String modelName) {
+            requests.add(request);
+            modelNames.add(modelName);
+            return super.translateChunk(request, modelName);
+        }
+
+        List<StructuredTranslationRequest> requests() {
+            return List.copyOf(requests);
+        }
+
+        List<String> modelNames() {
+            return List.copyOf(modelNames);
+        }
+
+        void reset() {
+            requests.clear();
+            modelNames.clear();
         }
     }
 }

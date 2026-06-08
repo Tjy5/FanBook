@@ -17,7 +17,7 @@ import com.fanbook.export.infrastructure.ExportArtifactRepository;
 import com.fanbook.translation.application.TranslationQualityAnalyzer;
 import com.fanbook.translation.application.TranslationQualityAnalyzer.ConsistencyWarning;
 import com.fanbook.translation.application.TranslationQualityAnalyzer.SegmentQualityScore;
-import com.fanbook.translation.config.TranslationChunkPlanningProperties;
+import com.fanbook.translation.application.TranslationRuleSnapshotService;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.HexFormat;
@@ -34,7 +34,7 @@ public class ConsistencyReportService {
     private final StorageService storageService;
     private final ExportArtifactRepository artifactRepository;
     private final BookAccessService bookAccessService;
-    private final TranslationChunkPlanningProperties chunkPlanningProperties;
+    private final TranslationRuleSnapshotService ruleSnapshotService;
     private final TranslationQualityAnalyzer qualityAnalyzer = new TranslationQualityAnalyzer();
     private final ObjectMapper objectMapper = JsonMapper.builder().build();
 
@@ -44,14 +44,14 @@ public class ConsistencyReportService {
             StorageService storageService,
             ExportArtifactRepository artifactRepository,
             BookAccessService bookAccessService,
-            TranslationChunkPlanningProperties chunkPlanningProperties
+            TranslationRuleSnapshotService ruleSnapshotService
     ) {
         this.bookRepository = bookRepository;
         this.segmentRepository = segmentRepository;
         this.storageService = storageService;
         this.artifactRepository = artifactRepository;
         this.bookAccessService = bookAccessService;
-        this.chunkPlanningProperties = chunkPlanningProperties;
+        this.ruleSnapshotService = ruleSnapshotService;
     }
 
     @Transactional
@@ -157,13 +157,13 @@ public class ConsistencyReportService {
     }
 
     private ReportStats stats(Long bookId) {
-        if (!bookRepository.existsById(bookId)) {
-            throw new FanbookException(ErrorCode.BOOK_NOT_FOUND, HttpStatus.NOT_FOUND, "Book '" + bookId + "' was not found.");
-        }
+        var book = bookRepository.findById(bookId)
+                .orElseThrow(() -> new FanbookException(ErrorCode.BOOK_NOT_FOUND, HttpStatus.NOT_FOUND, "Book '" + bookId + "' was not found."));
         List<SegmentEntity> segments = segmentRepository.findByBookIdOrderByChapterIdAscSegmentOrderAsc(bookId);
         int translated = (int) segments.stream().filter(segment -> segment.getStatus() == SegmentStatus.TRANSLATED).count();
         int failed = (int) segments.stream().filter(segment -> segment.getStatus() == SegmentStatus.FAILED).count();
-        var analysis = qualityAnalyzer.analyze(segments, chunkPlanningProperties.glossary());
+        var snapshot = ruleSnapshotService.dataForBook(book);
+        var analysis = qualityAnalyzer.analyze(segments, snapshot.glossary(), snapshot.preservation());
         return new ReportStats(
                 segments.size(),
                 translated,
