@@ -3,6 +3,7 @@ package com.fanbook.translation.api;
 import com.fanbook.auth.application.CurrentUserProvider;
 import com.fanbook.translation.application.TranslationGlossaryAnalysisService;
 import com.fanbook.translation.application.TranslationJobService;
+import com.fanbook.translation.application.TranslationPreflightService;
 import com.fanbook.translation.application.TranslationResumeService;
 import com.fanbook.translation.application.TranslationReviewService;
 import org.springframework.http.HttpStatus;
@@ -19,6 +20,7 @@ public class TranslationJobController {
     private final TranslationJobService translationJobService;
     private final TranslationResumeService translationResumeService;
     private final TranslationReviewService translationReviewService;
+    private final TranslationPreflightService translationPreflightService;
     private final TranslationGlossaryAnalysisService glossaryAnalysisService;
     private final CurrentUserProvider currentUserProvider;
 
@@ -26,12 +28,14 @@ public class TranslationJobController {
             TranslationJobService translationJobService,
             TranslationResumeService translationResumeService,
             TranslationReviewService translationReviewService,
+            TranslationPreflightService translationPreflightService,
             TranslationGlossaryAnalysisService glossaryAnalysisService,
             CurrentUserProvider currentUserProvider
     ) {
         this.translationJobService = translationJobService;
         this.translationResumeService = translationResumeService;
         this.translationReviewService = translationReviewService;
+        this.translationPreflightService = translationPreflightService;
         this.glossaryAnalysisService = glossaryAnalysisService;
         this.currentUserProvider = currentUserProvider;
     }
@@ -43,6 +47,15 @@ public class TranslationJobController {
             @RequestBody(required = false) StartTranslationRequest request
     ) {
         return translationJobService.startForCurrentUser(bookId, request, currentUserProvider.requireCurrentUser().username());
+    }
+
+    @PostMapping("/api/books/{bookId}/translation-jobs/preflight")
+    public TranslationPreflightResponse preflight(
+            @PathVariable Long bookId,
+            @RequestBody(required = false) StartTranslationRequest request
+    ) {
+        currentUserProvider.requireCurrentUser();
+        return translationPreflightService.preflightForCurrentUser(bookId, request);
     }
 
     @GetMapping("/api/translation-jobs/{jobId}")

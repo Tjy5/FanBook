@@ -53,6 +53,9 @@ for (const fragment of [
   "csrf",
   "generateArtifact",
   "downloadArtifact",
+  "translationPreflight",
+  "ProviderSafetyStrip",
+  "PreflightPanel",
   "ReaderPage",
   "SettingsPage",
   "AdminPage",
@@ -80,6 +83,7 @@ for (const fragment of [
   "/reports/consistency",
   "/translation-glossary-analysis",
   "/translation-glossary-candidates/accept",
+  "/translation-jobs/preflight",
 ]) {
   assert.ok(apiClient.includes(fragment), `Expected API client to include ${fragment}`);
 }
@@ -95,6 +99,8 @@ for (const fragment of [
   "/* ========== AUTH ========== */",
   ".app-shell",
   ".translate-grid",
+  ".provider-safety-strip",
+  ".preflight-panel",
   ".reader-layout",
   ".settings-layout",
   ".admin-grid",

@@ -13,6 +13,7 @@ import type {
   Role,
   SegmentNote,
   TranslationJob,
+  TranslationPreflight,
   TranslationPromptProfile,
   TranslationReviewResult,
 } from "../types";
@@ -127,6 +128,10 @@ export class ApiClient {
 
   startTranslation(bookId: number, payload: TranslationPayload): Promise<TranslationJob> {
     return this.request(`/books/${bookId}/translation-jobs`, { method: "POST", body: payload });
+  }
+
+  translationPreflight(bookId: number, payload: TranslationPayload): Promise<TranslationPreflight> {
+    return this.request(`/books/${bookId}/translation-jobs/preflight`, { method: "POST", body: payload });
   }
 
   resumeTranslation(bookId: number, payload: TranslationPayload): Promise<TranslationJob> {
@@ -268,6 +273,7 @@ export function createEndpoint(apiBase = "/api") {
     getBook: (bookId: number | string) => `${apiBase}/books/${bookId}`,
     updateTranslatedTitle: (bookId: number | string) => `${apiBase}/books/${bookId}/translated-title`,
     startTranslation: (bookId: number | string) => `${apiBase}/books/${bookId}/translation-jobs`,
+    translationPreflight: (bookId: number | string) => `${apiBase}/books/${bookId}/translation-jobs/preflight`,
     resumeTranslation: (bookId: number | string) => `${apiBase}/books/${bookId}/translation-jobs/resume`,
     cancelTranslation: (jobId: number | string) => `${apiBase}/translation-jobs/${jobId}/cancel`,
     reviewTranslation: (bookId: number | string) => `${apiBase}/books/${bookId}/translation-review`,

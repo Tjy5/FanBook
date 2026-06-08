@@ -162,6 +162,21 @@ try {
   assert.equal(notes.statusCode, 200);
   assert.equal(notes.body.length, 2);
 
+  const providers = await requestJson(mockApiPort, "/api/providers", { cookie });
+  assert.equal(providers.statusCode, 200);
+  assert.equal(providers.body.providers[0].endpoint, "chat-completions");
+  assert.equal(providers.body.providers[0].paid_safety_level, "unsafe");
+
+  const preflight = await requestJson(mockApiPort, "/api/books/42/translation-jobs/preflight", {
+    method: "POST",
+    body: { providerName: "openai-compatible", modelName: "gpt-5" },
+    cookie,
+  });
+  assert.equal(preflight.statusCode, 200);
+  assert.equal(preflight.body.estimatedChunks, 52);
+  assert.equal(preflight.body.safeToStart, false);
+  assert.equal(preflight.body.warnings.length, 2);
+
   const adminLogin = await requestJson(mockApiPort, "/api/auth/login", {
     method: "POST",
     body: { username: MOCK_ADMIN_USERNAME, password: MOCK_ADMIN_PASSWORD },

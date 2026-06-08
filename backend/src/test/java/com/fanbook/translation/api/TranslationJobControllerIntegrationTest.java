@@ -20,6 +20,7 @@ import com.fanbook.common.lock.BookTranslationLock;
 import com.fanbook.testsupport.MinimalEpubFactory;
 import com.fanbook.translation.application.TranslationChunkPublisher;
 import com.fanbook.translation.infrastructure.TranslationChunkRepository;
+import com.fanbook.translation.infrastructure.TranslationJobRepository;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -47,6 +48,7 @@ class TranslationJobControllerIntegrationTest {
         registry.add("spring.datasource.driver-class-name", () -> "org.h2.Driver");
         registry.add("spring.jpa.database-platform", () -> "org.hibernate.dialect.H2Dialect");
         registry.add("fanbook.storage.root", () -> "target/translation-job-controller-storage");
+        registry.add("fanbook.translation.messaging.listener-auto-startup", () -> false);
     }
 
     @Autowired
@@ -56,6 +58,9 @@ class TranslationJobControllerIntegrationTest {
 
     @Autowired
     TranslationChunkRepository chunkRepository;
+
+    @Autowired
+    TranslationJobRepository jobRepository;
 
     @Autowired
     UserRepository userRepository;
@@ -102,6 +107,61 @@ class TranslationJobControllerIntegrationTest {
                 .andExpect(jsonPath("$.jobId").value(jobId))
                 .andReturn().getResponse().getContentAsString();
         assertThat(Set.of("QUEUED", "RUNNING", "COMPLETED")).contains(objectMapper.readTree(readBody).get("status").asText());
+    }
+
+    @Test
+    void preflightEstimatesChunksWithoutCreatingJobOrChunks() throws Exception {
+        Long bookId = uploadBook();
+
+        String body = mockMvc.perform(post("/api/books/" + bookId + "/translation-jobs/preflight")
+                        .with(memberUser())
+                        .with(csrfToken())
+                        .contentType("application/json")
+                        .content("{\"providerName\":\"mock\",\"modelName\":\"mock-translator\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.bookId").value(bookId))
+                .andExpect(jsonPath("$.providerName").value("mock"))
+                .andExpect(jsonPath("$.modelName").value("mock-translator"))
+                .andExpect(jsonPath("$.configured").value(true))
+                .andExpect(jsonPath("$.realProvider").value(false))
+                .andExpect(jsonPath("$.safeToStart").value(true))
+                .andExpect(jsonPath("$.paidSafetyLevel").value("mock"))
+                .andExpect(jsonPath("$.totalSegments").value(3))
+                .andExpect(jsonPath("$.estimatedChunks").value(1))
+                .andExpect(jsonPath("$.warnings").isArray())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(objectMapper.readTree(body).get("warnings")).isEmpty();
+        assertThat(jobRepository.count()).isZero();
+        assertThat(chunkRepository.count()).isZero();
+
+        String jobBody = mockMvc.perform(post("/api/books/" + bookId + "/translation-jobs")
+                        .with(memberUser())
+                        .with(csrfToken())
+                        .contentType("application/json")
+                        .content("{\"providerName\":\"mock\",\"modelName\":\"mock-translator\"}"))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        Long jobId = objectMapper.readTree(jobBody).get("jobId").asLong();
+        assertThat(chunkRepository.findByJobIdOrderByChunkOrderAsc(jobId)).hasSize(1);
+    }
+
+    @Test
+    void preflightRequiresCsrfAndMemberRole() throws Exception {
+        Long bookId = uploadBook();
+
+        mockMvc.perform(post("/api/books/" + bookId + "/translation-jobs/preflight")
+                        .with(memberUser())
+                        .contentType("application/json")
+                        .content("{\"providerName\":\"mock\"}"))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(post("/api/books/" + bookId + "/translation-jobs/preflight")
+                        .with(viewer())
+                        .with(csrfToken())
+                        .contentType("application/json")
+                        .content("{\"providerName\":\"mock\"}"))
+                .andExpect(status().isForbidden());
     }
 
     @Test

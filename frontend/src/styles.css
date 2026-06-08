@@ -634,6 +634,11 @@ select:focus-visible,
   background: var(--success-soft);
 }
 
+.status-warning {
+  color: var(--warning);
+  background: var(--warning-soft);
+}
+
 .status-failed {
   color: var(--danger);
   background: var(--danger-soft);
@@ -1398,6 +1403,126 @@ select:focus-visible,
   font-size: 12px;
   line-height: 1.5;
   overflow-wrap: anywhere;
+}
+
+.provider-safety-strip {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+.provider-safety-strip div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.provider-safety-strip span {
+  color: var(--muted-strong);
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.provider-safety-strip strong {
+  min-width: 0;
+  color: var(--ink);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.provider-safety-strip p {
+  grid-column: 1 / -1;
+  margin: 2px 0 0;
+  color: var(--muted-strong);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.preflight-panel {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper-soft);
+}
+
+.preflight-panel header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.preflight-panel strong {
+  font-size: 13px;
+}
+
+.preflight-panel p {
+  margin: 0;
+  color: var(--muted-strong);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.preflight-safe {
+  border-color: rgba(36, 120, 95, 0.36);
+  background: var(--success-soft);
+}
+
+.preflight-danger {
+  border-color: rgba(181, 63, 74, 0.38);
+  background: var(--danger-soft);
+}
+
+.preflight-empty {
+  border-style: dashed;
+}
+
+.preflight-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.preflight-facts span {
+  min-width: 0;
+  padding: 7px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.6);
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.preflight-list {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding-left: 16px;
+  color: var(--ink-soft);
+  font-size: 11px;
+  line-height: 1.42;
+}
+
+.warning-list li::marker {
+  color: var(--danger);
+}
+
+.recommendation-list li::marker {
+  color: var(--reader);
+}
+
+.preflight-ok {
+  color: var(--success) !important;
+  font-weight: 900;
 }
 
 .prompt-profile-form,

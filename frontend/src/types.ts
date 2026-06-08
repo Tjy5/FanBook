@@ -33,6 +33,19 @@ export interface ProviderProfile {
   global_max_concurrency: number;
   per_chapter_concurrency: number;
   is_default: boolean;
+  endpoint?: string | null;
+  uses_chat_completions?: boolean | null;
+  thinking_mode?: string | null;
+  json_mode?: boolean | null;
+  min_request_interval_seconds?: number | null;
+  request_timeout_seconds?: number | null;
+  messaging_prefetch?: number | null;
+  messaging_concurrency?: number | null;
+  messaging_listener_auto_startup?: boolean | null;
+  chunk_target_characters?: number | null;
+  max_segments_per_chunk?: number | null;
+  max_attempts_per_chunk?: number | null;
+  paid_safety_level?: "mock" | "safe" | "warning" | "unsafe" | string | null;
 }
 
 export interface BookListItem {
@@ -102,6 +115,34 @@ export interface TranslationPromptProfile {
   reviewInstruction?: string;
   analysisInstruction?: string;
   preserveFormatting?: boolean;
+}
+
+export interface TranslationPreflight {
+  bookId: number;
+  providerName: string;
+  modelName: string;
+  configured: boolean;
+  realProvider: boolean;
+  safeToStart: boolean;
+  paidSafetyLevel: "mock" | "safe" | "warning" | "unsafe" | string;
+  totalSegments: number;
+  estimatedChunks: number;
+  endpoint: string;
+  usesChatCompletions: boolean;
+  thinkingMode: string;
+  jsonMode: boolean;
+  maxConcurrency: number;
+  minRequestIntervalSeconds: number;
+  requestTimeoutSeconds: number;
+  messagingPrefetch: number;
+  messagingConcurrency: number;
+  messagingListenerAutoStartup: boolean;
+  chunkTargetCharacters: number;
+  maxSegmentsPerChunk: number;
+  maxAttemptsPerChunk: number;
+  estimatedMinimumRuntimeSeconds: number;
+  warnings: string[];
+  recommendations: string[];
 }
 
 export interface GlossaryCandidate {

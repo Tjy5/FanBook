@@ -111,6 +111,19 @@ const providers = {
       global_max_concurrency: 3,
       per_chapter_concurrency: 1,
       is_default: true,
+      endpoint: "chat-completions",
+      uses_chat_completions: true,
+      thinking_mode: "disabled",
+      json_mode: true,
+      min_request_interval_seconds: 2,
+      request_timeout_seconds: 120,
+      messaging_prefetch: 2,
+      messaging_concurrency: 2,
+      messaging_listener_auto_startup: true,
+      chunk_target_characters: 2500,
+      max_segments_per_chunk: 16,
+      max_attempts_per_chunk: 2,
+      paid_safety_level: "unsafe",
     },
   ],
 };
@@ -298,6 +311,42 @@ function routeAuthenticatedRequest(request, response, path, account) {
       translated_segments: 0,
       failed_segments: 0,
       estimated_remaining_seconds: null,
+    });
+    return;
+  }
+  if (path === "/books/42/translation-jobs/preflight" && request.method === "POST") {
+    sendJson(response, 200, {
+      bookId: 42,
+      providerName: "openai-compatible",
+      modelName: "gpt-5",
+      configured: true,
+      realProvider: true,
+      safeToStart: false,
+      paidSafetyLevel: "unsafe",
+      totalSegments: 820,
+      estimatedChunks: 52,
+      endpoint: "chat-completions",
+      usesChatCompletions: true,
+      thinkingMode: "disabled",
+      jsonMode: true,
+      maxConcurrency: 3,
+      minRequestIntervalSeconds: 2,
+      requestTimeoutSeconds: 120,
+      messagingPrefetch: 2,
+      messagingConcurrency: 2,
+      messagingListenerAutoStartup: true,
+      chunkTargetCharacters: 2500,
+      maxSegmentsPerChunk: 16,
+      maxAttemptsPerChunk: 2,
+      estimatedMinimumRuntimeSeconds: 104,
+      warnings: [
+        "Provider max concurrency is 3; use 1 for 60 RPM paid models.",
+        "Provider minimum request interval is 2s; use at least 6s for 60 RPM paid models.",
+      ],
+      recommendations: [
+        "Use FANBOOK_AI_MAX_CONCURRENCY=1 for paid low-RPM models.",
+        "Use FANBOOK_AI_MIN_REQUEST_INTERVAL=6s for a 60 RPM limit.",
+      ],
     });
     return;
   }

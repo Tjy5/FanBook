@@ -72,6 +72,7 @@ for (const fragment of [
   "listBooks",
   "readerSegments",
   "notesExport",
+  "translationPreflight",
   "glossaryAnalysis",
   "acceptGlossaryCandidates",
   "extractFilename",
@@ -87,6 +88,9 @@ for (const fragment of [
   "export interface ReaderSegment",
   "export interface SegmentNote",
   "export interface TranslationPromptProfile",
+  "export interface TranslationPreflight",
+  "paidSafetyLevel",
+  "estimatedChunks",
   "export interface GlossaryAnalysisResult",
   "export interface GlossaryImportResult",
 ]) {

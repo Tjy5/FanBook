@@ -49,6 +49,7 @@ import type {
   GlossaryAnalysisResult,
   GlossaryImportResult,
   TranslationPromptProfile,
+  TranslationPreflight,
   TranslationReviewResult,
   TranslationJob,
 } from "./types";
@@ -331,6 +332,8 @@ function App() {
   const [promptProfileDraft, setPromptProfileDraft] = useState<PromptProfileDraft>(() => defaultPromptProfileDraft());
   const [glossaryAnalysis, setGlossaryAnalysis] = useState<GlossaryAnalysisResult | null>(null);
   const [glossaryImport, setGlossaryImport] = useState<GlossaryImportResult | null>(null);
+  const [translationPreflight, setTranslationPreflight] = useState<TranslationPreflight | null>(null);
+  const [translationPreflightError, setTranslationPreflightError] = useState<string | null>(null);
   const [reviewDraft, setReviewDraft] = useState<ReviewDraft>(() => defaultReviewDraft());
   const [reviewResult, setReviewResult] = useState<TranslationReviewResult | null>(null);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
@@ -422,8 +425,15 @@ function App() {
   useEffect(() => {
     setGlossaryAnalysis(null);
     setGlossaryImport(null);
+    setTranslationPreflight(null);
+    setTranslationPreflightError(null);
     setReviewResult(null);
   }, [currentBookId]);
+
+  useEffect(() => {
+    setTranslationPreflight(null);
+    setTranslationPreflightError(null);
+  }, [selectedProviderProfileName]);
 
   useEffect(() => {
     setReaderPageIndex((current) => normalizeReaderPageIndex(current, readerSegments.length));
@@ -690,6 +700,26 @@ function App() {
     setBusyAction("translate");
     try {
       const payload = translationPayload(selectedProviderProfile, promptProfileDraft);
+      let preflight: TranslationPreflight;
+      try {
+        preflight = await api.translationPreflight(currentBookId, payload);
+      } catch (error) {
+        const message = normalizeError(error, "翻译预检失败。");
+        setTranslationPreflightError(message);
+        appendLog(message);
+        return;
+      }
+      setTranslationPreflight(preflight);
+      setTranslationPreflightError(null);
+      appendLog(`翻译预检完成：${preflight.totalSegments} 段，预计 ${preflight.estimatedChunks} 个分块。`);
+      if (!preflight.safeToStart) {
+        appendLog("翻译预检未通过，已阻止启动。请先调整后端 provider、限速或异步 worker 配置。");
+        return;
+      }
+      if (preflight.realProvider && preflight.configured && !window.confirm(preflightConfirmationText(preflight))) {
+        appendLog("已取消真实 provider 翻译启动。");
+        return;
+      }
       const response = await api.startTranslation(currentBookId, payload);
       appendLog(`翻译任务已启动，任务 #${jobIdOf(response) ?? "?"}。`);
       await loadBook(currentBookId, { silent: true });
@@ -861,6 +891,10 @@ function App() {
     }
     if (!currentBookId || !isMemberLike) {
       appendLog("当前角色不能生成导出。");
+      return;
+    }
+    if (!isJobCompleted(bookDetail?.current_job)) {
+      appendLog("翻译完成后才能生成导出和一致性报告。");
       return;
     }
     setBusyAction(`artifact-${kind}`);
@@ -1220,6 +1254,8 @@ function App() {
               glossaryImport={glossaryImport}
               reviewDraft={reviewDraft}
               reviewResult={reviewResult}
+              translationPreflight={translationPreflight}
+              translationPreflightError={translationPreflightError}
               activity={activity}
               busyAction={busyAction}
               fileInputRef={fileInputRef}
@@ -1233,6 +1269,8 @@ function App() {
               onProviderChange={(value) => {
                 setSelectedProviderProfileName(value);
                 localStorage.setItem(PROVIDER_PROFILE_STORAGE_KEY, value);
+                setTranslationPreflight(null);
+                setTranslationPreflightError(null);
               }}
               onPromptProfileChange={setPromptProfileDraft}
               onAnalyzeGlossary={() => void analyzeGlossary()}
@@ -1474,6 +1512,8 @@ function TranslatePage(props: {
   glossaryImport: GlossaryImportResult | null;
   reviewDraft: ReviewDraft;
   reviewResult: TranslationReviewResult | null;
+  translationPreflight: TranslationPreflight | null;
+  translationPreflightError: string | null;
   activity: ActivityEntry[];
   busyAction: string | null;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
@@ -1499,6 +1539,8 @@ function TranslatePage(props: {
   const canResume = Boolean(props.currentBook && ["failed", "canceled"].includes(String(props.job?.status || "").toLowerCase()));
   const canRun = props.isMemberLike && Boolean(props.currentBook) && Boolean(props.providerProfiles.length) && !activeJob;
   const canPrepare = props.isMemberLike && Boolean(props.currentBook) && Boolean(props.providerProfiles.length) && !activeJob;
+  const canGenerateArtifacts = props.isMemberLike && isJobCompleted(props.job);
+  const selectedProviderProfile = pickProvider(props.providerProfiles, props.selectedProviderProfileName);
   const analyzedCandidates = props.glossaryAnalysis?.candidates || [];
   const acceptedCandidates = props.glossaryImport?.acceptedCandidates ?? 0;
   const conflicts = props.glossaryImport?.conflicts ?? analyzedCandidates.filter((candidate) => candidate.status === "CONFLICT").length;
@@ -1535,7 +1577,9 @@ function TranslatePage(props: {
                 </select>
               </label>
               <p className="profile-summary">{providerSummary(props.providerProfiles, props.selectedProviderProfileName)}</p>
-              <button className="button button-primary full" type="submit" disabled={!canRun || props.busyAction === "translate"}><Play size={16} />开始翻译</button>
+              <ProviderSafetyStrip profile={selectedProviderProfile} />
+              <PreflightPanel preflight={props.translationPreflight} error={props.translationPreflightError} />
+              <button className="button button-primary full" type="submit" disabled={!canRun || props.busyAction === "translate"}><Play size={16} />{props.busyAction === "translate" ? "预检中..." : "开始翻译"}</button>
               <button className="button button-secondary full" type="button" onClick={props.onResume} disabled={!props.isMemberLike || !canResume}><RotateCcw size={16} />恢复任务</button>
               <button className="button button-danger full" type="button" onClick={props.onCancel} disabled={!props.isMemberLike || !activeJob}><XCircle size={16} />取消任务</button>
             </form>
@@ -1701,13 +1745,17 @@ function TranslatePage(props: {
                     <Stat label="已翻译" value={totals.translated} className="accent-text" />
                     <Stat label="失败" value={totals.failed} className="danger-text" />
                     <Stat label="剩余" value={Math.max(0, totals.total - totals.translated - totals.failed)} />
+                    <Stat label="预计分块" value={props.translationPreflight?.estimatedChunks || 0} />
                   </div>
                 </div>
                 <div className="progress-inline"><div className="progress-bar" style={{ width: `${percentage}%` }}></div></div>
                 <p className="estimate-text">{props.job ? `预计剩余时间：${estimateRemainingTime(props.job, totals, percentage)}` : "当前没有活动任务"}</p>
               </section>
               <section className="exports-panel surface-panel">
-                <div className="section-heading compact-heading"><div><p className="eyebrow">Output</p><h2><Archive size={18} />导出</h2></div></div>
+                <div className="section-heading compact-heading">
+                  <div><p className="eyebrow">Output</p><h2><Archive size={18} />导出</h2><p>{canGenerateArtifacts ? "翻译已完成，可以生成或下载成品。" : "翻译完成后再生成中文 EPUB、双语 EPUB 和一致性报告。"}</p></div>
+                  <span className={`status-pill ${canGenerateArtifacts ? "status-success" : "status-neutral"}`}>{canGenerateArtifacts ? "可生成" : "等待完成"}</span>
+                </div>
                 <div className="export-list">
                   {(["zh", "bilingual", "consistency_report"] as ArtifactKind[]).map((kind) => (
                     <ExportCard key={kind} kind={kind} artifact={findArtifact(props.artifacts, kind)} />
@@ -1718,7 +1766,7 @@ function TranslatePage(props: {
                     const ready = Boolean(findReadyArtifact(props.artifacts, kind));
                     return (
                       <div key={kind} className="export-action-row">
-                        {props.isMemberLike ? <button className="button button-secondary full" type="button" onClick={() => props.onGenerate(kind)} disabled={props.busyAction === `artifact-${kind}`}>生成{translateArtifactKind(kind)}</button> : null}
+                        {props.isMemberLike ? <button className="button button-secondary full" type="button" onClick={() => props.onGenerate(kind)} disabled={!canGenerateArtifacts || props.busyAction === `artifact-${kind}`}>生成{translateArtifactKind(kind)}</button> : null}
                         <button className="button button-secondary full" type="button" onClick={() => props.onDownload(kind)} disabled={!ready}><Download size={16} />下载{translateArtifactKind(kind)}</button>
                       </div>
                     );
@@ -1951,7 +1999,7 @@ function SettingsPage(props: {
           <div>
             <p className="eyebrow">Settings</p>
             <h1>个人 AI 设置</h1>
-            <p className="hero-copy">这里管理个人资料、阅读偏好和 AI 翻译配置。当前保存为本地草稿；后端加密密钥存储接入后再同步到服务端。</p>
+            <p className="hero-copy">这里管理个人资料、阅读偏好和本地 AI 配置草稿。真实翻译 provider 仍由后端运行时环境配置决定。</p>
           </div>
           <div className="settings-user-chip">
             <span aria-hidden="true"><UserRound size={18} /></span>
@@ -1974,7 +2022,7 @@ function SettingsPage(props: {
 
         <section className="surface-panel settings-panel settings-ai-panel">
           <div className="section-heading">
-            <div><p className="eyebrow">AI Profiles</p><h2><KeyRound size={18} />我的模型配置</h2><p>选择平台配置或编辑个人草稿。API Key 当前只保留在输入框中，不写入持久存储。</p></div>
+            <div><p className="eyebrow">AI Profiles</p><h2><KeyRound size={18} />我的模型配置</h2><p>选择后端平台配置或编辑个人草稿。这里输入的 API Key 只留在当前浏览器会话，不会写入后端，也不会改变真实翻译运行配置。</p></div>
             <span className={`status-pill ${selectedProfile?.configured ? "status-success" : "status-neutral"}`}>{selectedProfile?.configured ? "平台已配置" : "本地草稿"}</span>
           </div>
           <div className="settings-form-grid ai-profile-grid">
@@ -1985,7 +2033,7 @@ function SettingsPage(props: {
               {["OpenAI", "Anthropic", "Gemini", "DeepSeek", "Custom"].map((provider) => <option key={provider} value={provider}>{provider}</option>)}
             </select></label>
             <label className="field"><span>模型</span><input value={draft.modelName} onChange={(event) => updateDraft("modelName", event.target.value)} placeholder="例如 gpt-4.1-mini" /></label>
-            <label className="field api-key-field"><span>API Key</span><input type="password" value={draft.apiKey} onChange={(event) => updateDraft("apiKey", event.target.value)} placeholder="只保留当前会话，不写入 localStorage" autoComplete="off" /></label>
+            <label className="field api-key-field"><span>API Key</span><input type="password" value={draft.apiKey} onChange={(event) => updateDraft("apiKey", event.target.value)} placeholder="仅本页草稿，不会配置后端 provider" autoComplete="off" /></label>
             <label className="field"><span>每分钟请求上限</span><input type="number" min={1} max={10000} value={draft.maxRequestsPerMinute} onChange={(event) => updateDraft("maxRequestsPerMinute", numberFromInput(event.target.value, 60))} /></label>
             <label className="field"><span>全局并发</span><input type="number" min={1} max={64} value={draft.globalMaxConcurrency} onChange={(event) => updateDraft("globalMaxConcurrency", numberFromInput(event.target.value, 4))} /></label>
             <label className="field"><span>章节内并发</span><input type="number" min={1} max={32} value={draft.perChapterConcurrency} onChange={(event) => updateDraft("perChapterConcurrency", numberFromInput(event.target.value, 2))} /></label>
@@ -2027,9 +2075,9 @@ function SettingsPage(props: {
             <button className="button button-primary compact" type="submit"><Save size={16} />保存设置</button>
           </div>
           <ul className="settings-check-list">
-            <li>API Key 不应长期明文保存在浏览器本地存储。</li>
-            <li>保存后前端只应显示 masked key。</li>
-            <li>后端需要按用户隔离并加密保存密钥。</li>
+            <li>API Key 不会保存到 localStorage，也不会提交到后端配置接口。</li>
+            <li>真实付费翻译只读取后端运行时 provider、模型、限速和 worker 配置。</li>
+            <li>如需前端配置真实密钥，必须先增加后端加密持久化和权限边界。</li>
           </ul>
         </section>
       </form>
@@ -2092,6 +2140,69 @@ function Metric({ label, value, className = "" }: { label: string; value: number
 
 function Stat({ label, value, className = "" }: { label: string; value: number; className?: string }) {
   return <div><span>{label}</span><strong className={className}>{formatNumber(value)}</strong></div>;
+}
+
+function ProviderSafetyStrip({ profile }: { profile: ProviderProfile | null }) {
+  if (!profile) {
+    return <div className="provider-safety-strip status-neutral">暂无 provider 运行配置。前端不会直接持有后端 provider 密钥。</div>;
+  }
+  return (
+    <div className={`provider-safety-strip ${safetyStatusClass(profile.paid_safety_level || (profile.configured ? "safe" : "unsafe"))}`} aria-label="Provider 运行安全摘要">
+      <div><span>模型</span><strong>{profile.default_model_name}</strong></div>
+      <div><span>端点</span><strong>{profile.endpoint || "unknown"}</strong></div>
+      <div><span>Thinking</span><strong>{profile.thinking_mode || "unknown"}</strong></div>
+      <div><span>Provider 并发</span><strong>{formatNumber(profile.global_max_concurrency)}</strong></div>
+      <div><span>请求间隔</span><strong>{secondsText(profile.min_request_interval_seconds)}</strong></div>
+      <div><span>Worker</span><strong>{workerText(profile)}</strong></div>
+      <div><span>状态</span><strong>{profile.configured ? "后端已配置" : "后端未配置"}</strong></div>
+      <div><span>安全级别</span><strong>{safetyLevelLabel(profile.paid_safety_level || "unknown")}</strong></div>
+      <p>API Key 不会从后端返回；设置页中的 API Key 只是当前浏览器会话草稿，不会改变后端运行时 provider 配置。</p>
+    </div>
+  );
+}
+
+function PreflightPanel({ preflight, error }: { preflight: TranslationPreflight | null; error: string | null }) {
+  if (error) {
+    return (
+      <div className="preflight-panel preflight-danger" role="alert">
+        <strong>预检失败</strong>
+        <p>{error}</p>
+      </div>
+    );
+  }
+  if (!preflight) {
+    return (
+      <div className="preflight-panel preflight-empty">
+        <strong>启动前会自动预检</strong>
+        <p>预检只读取书籍分段和后端运行配置，不会调用模型，也不会创建翻译任务。</p>
+      </div>
+    );
+  }
+  return (
+    <div className={`preflight-panel ${preflight.safeToStart ? "preflight-safe" : "preflight-danger"}`} aria-label="翻译预检结果">
+      <header>
+        <strong>{preflight.safeToStart ? "预检通过" : "预检未通过"}</strong>
+        <span className={`status-pill ${safetyStatusClass(preflight.paidSafetyLevel)}`}>{safetyLevelLabel(preflight.paidSafetyLevel)}</span>
+      </header>
+      <div className="preflight-facts">
+        <span>{formatNumber(preflight.totalSegments)} 段</span>
+        <span>{formatNumber(preflight.estimatedChunks)} 分块</span>
+        <span>{secondsText(preflight.minRequestIntervalSeconds)} 间隔</span>
+        <span>{runtimeText(preflight.estimatedMinimumRuntimeSeconds)} 最低耗时</span>
+      </div>
+      <p>{preflight.providerName} · {preflight.modelName} · {preflight.endpoint} · thinking {preflight.thinkingMode}</p>
+      {preflight.warnings.length ? (
+        <ul className="preflight-list warning-list">
+          {preflight.warnings.map((warning) => <li key={warning}>{warning}</li>)}
+        </ul>
+      ) : <p className="preflight-ok">当前配置没有明显的付费限速风险。</p>}
+      {preflight.recommendations.length ? (
+        <ul className="preflight-list recommendation-list">
+          {preflight.recommendations.slice(0, 3).map((recommendation) => <li key={recommendation}>{recommendation}</li>)}
+        </ul>
+      ) : null}
+    </div>
+  );
 }
 
 function ExportCard({ kind, artifact }: { kind: ArtifactKind; artifact?: ExportArtifact }) {
@@ -2265,7 +2376,68 @@ function providerSummary(profiles: ProviderProfile[], selectedName: string | nul
   if (!profile) {
     return "当前没有可用的翻译配置档。";
   }
-  return `当前使用 ${profile.profile_name}，provider 为 ${profile.provider_name}，模型为 ${profile.default_model_name}，状态 ${profile.configured ? "已配置" : "未配置"}。`;
+  return `当前使用 ${profile.profile_name}，provider 为 ${profile.provider_name}，模型为 ${profile.default_model_name}，后端状态 ${profile.configured ? "已配置" : "未配置"}。`;
+}
+
+function workerText(profile: ProviderProfile) {
+  const listener = profile.messaging_listener_auto_startup === false ? "未启动" : "已启动";
+  return `${listener} · ${formatNumber(profile.messaging_concurrency || 0)}/${formatNumber(profile.messaging_prefetch || 0)}`;
+}
+
+function secondsText(value: number | null | undefined) {
+  const seconds = Number(value || 0);
+  return seconds > 0 ? `${formatNumber(seconds)}s` : "0s";
+}
+
+function runtimeText(value: number | null | undefined) {
+  const seconds = Number(value || 0);
+  return seconds > 0 ? formatDuration(seconds) : "无需等待";
+}
+
+function safetyStatusClass(level: string | null | undefined) {
+  const normalized = String(level || "").toLowerCase();
+  if (normalized === "safe" || normalized === "mock") {
+    return "status-success";
+  }
+  if (normalized === "unsafe") {
+    return "status-failed";
+  }
+  if (normalized === "warning") {
+    return "status-warning";
+  }
+  return "status-neutral";
+}
+
+function safetyLevelLabel(level: string | null | undefined) {
+  const normalized = String(level || "").toLowerCase();
+  if (normalized === "mock") {
+    return "Mock";
+  }
+  if (normalized === "safe") {
+    return "安全";
+  }
+  if (normalized === "warning") {
+    return "需注意";
+  }
+  if (normalized === "unsafe") {
+    return "不安全";
+  }
+  return "未知";
+}
+
+function preflightConfirmationText(preflight: TranslationPreflight) {
+  return [
+    "确认启动真实 provider 翻译？",
+    "",
+    `模型：${preflight.modelName}`,
+    `端点：${preflight.endpoint}`,
+    `Thinking：${preflight.thinkingMode}`,
+    `预计分块：${formatNumber(preflight.estimatedChunks)}`,
+    `请求间隔：${secondsText(preflight.minRequestIntervalSeconds)}`,
+    `Provider 并发：${formatNumber(preflight.maxConcurrency)}`,
+    `Worker 并发/预取：${formatNumber(preflight.messagingConcurrency)} / ${formatNumber(preflight.messagingPrefetch)}`,
+    `预检警告：${formatNumber(preflight.warnings.length)} 条`,
+  ].join("\n");
 }
 
 function translationPayload(profile: ProviderProfile | null, promptDraft?: PromptProfileDraft) {
@@ -2489,6 +2661,10 @@ function findArtifact(artifacts: ExportArtifact[], kind: ArtifactKind) {
 
 function findReadyArtifact(artifacts: ExportArtifact[], kind: ArtifactKind) {
   return artifacts.find((artifact) => artifact.kind === kind && String(artifact.status).toLowerCase() === "ready");
+}
+
+function isJobCompleted(job: TranslationJob | null | undefined) {
+  return String(job?.status || "").toLowerCase() === "completed";
 }
 
 function defaultArtifactFilename(kind: ArtifactKind) {
