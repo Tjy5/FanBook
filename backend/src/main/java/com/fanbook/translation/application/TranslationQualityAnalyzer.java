@@ -1,6 +1,7 @@
 package com.fanbook.translation.application;
 
 import com.fanbook.ai.domain.StructuredTranslationGlossaryItem;
+import com.fanbook.book.application.SegmentInlineMarkup;
 import com.fanbook.book.domain.SegmentEntity;
 import com.fanbook.book.domain.SegmentStatus;
 import java.util.ArrayList;
@@ -27,7 +28,7 @@ public final class TranslationQualityAnalyzer {
         List<SegmentQualityScore> segmentScores = new ArrayList<>();
         for (SegmentEntity segment : segments == null ? List.<SegmentEntity>of() : segments) {
             String source = normalized(segment.getSourceText());
-            String translated = normalized(segment.getTranslatedText());
+            String translated = normalized(SegmentInlineMarkup.displayTranslatedText(segment));
             List<String> reasons = new ArrayList<>();
             int score = 100;
             if (segment.getStatus() == SegmentStatus.FAILED) {
@@ -93,6 +94,20 @@ public final class TranslationQualityAnalyzer {
                 score -= 20;
                 reasons.add("preserved_token_missing");
             }
+            SegmentInlineMarkup.PlaceholderValidation placeholderValidation = SegmentInlineMarkup.validateTranslatedText(
+                    segment.getTranslatedText(),
+                    segment.getLocatorJson()
+            );
+            if (!placeholderValidation.valid()) {
+                warnings.add(warning(
+                        "placeholder_mismatch",
+                        "warning",
+                        segment,
+                        "Inline placeholder mismatch: " + placeholderValidation.message()
+                ));
+                score -= 30;
+                reasons.add("placeholder_mismatch");
+            }
             for (var glossaryItem : glossary == null ? List.<StructuredTranslationGlossaryItem>of() : glossary) {
                 if (hasGlossaryMismatch(source, translated, glossaryItem)) {
                     ConsistencyWarning warning = warning(
@@ -128,7 +143,7 @@ public final class TranslationQualityAnalyzer {
                 segment.getSegmentOrder(),
                 message,
                 preview(segment.getSourceText()),
-                preview(segment.getTranslatedText())
+                preview(SegmentInlineMarkup.displayTranslatedText(segment))
         );
     }
 

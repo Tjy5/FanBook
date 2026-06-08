@@ -9,6 +9,7 @@ import com.fanbook.ai.domain.StructuredTranslationGlossaryItem;
 import com.fanbook.ai.domain.StructuredTranslationItem;
 import com.fanbook.ai.domain.StructuredTranslationRequest;
 import com.fanbook.ai.domain.StructuredTranslationSourceItem;
+import com.fanbook.book.application.SegmentInlineMarkup;
 import com.fanbook.book.domain.SegmentEntity;
 import com.fanbook.book.domain.SegmentStatus;
 import com.fanbook.book.infrastructure.SegmentRepository;
@@ -144,7 +145,9 @@ public class TranslationJobExecutor {
                 Map<Long, String> translatedById = result.items().stream()
                         .collect(Collectors.toMap(StructuredTranslationItem::segmentId, StructuredTranslationItem::translatedText));
                 for (SegmentEntity segment : segmentRepository.findAllById(work.segmentIds())) {
-                    segment.markTranslated(textProtector.postProcess(translatedById.get(segment.getId())));
+                    String translated = textProtector.postProcess(translatedById.get(segment.getId()));
+                    validateInlinePlaceholders(segment, translated);
+                    segment.markTranslated(translated);
                 }
                 TranslationChunkEntity managedChunk = chunkRepository.findById(chunk.getId())
                         .orElseThrow(() -> notFound("Translation chunk '" + chunk.getId() + "' was not found."));
@@ -175,7 +178,7 @@ public class TranslationJobExecutor {
                                     "Missing segment '" + id + "' for translation chunk '" + chunk.getId() + "'."
                             );
                         }
-                        return new StructuredTranslationSourceItem(id, segment.getSourceText());
+                        return new StructuredTranslationSourceItem(id, SegmentInlineMarkup.providerSourceText(segment));
                     })
                     .toList();
             SegmentEntity first = segmentById.get(segmentIds.getFirst());
@@ -271,6 +274,20 @@ public class TranslationJobExecutor {
 
     private FanbookException notFound(String message) {
         return new FanbookException(ErrorCode.TRANSLATION_JOB_NOT_FOUND, HttpStatus.NOT_FOUND, message);
+    }
+
+    private static void validateInlinePlaceholders(SegmentEntity segment, String translated) {
+        SegmentInlineMarkup.PlaceholderValidation validation = SegmentInlineMarkup.validateTranslatedText(
+                translated,
+                segment.getLocatorJson()
+        );
+        if (!validation.valid()) {
+            throw new FanbookException(
+                    ErrorCode.STRUCTURED_OUTPUT_INVALID,
+                    HttpStatus.BAD_GATEWAY,
+                    "Inline placeholder validation failed for segment '" + segment.getId() + "': " + validation.message()
+            );
+        }
     }
 
     private record ChunkWork(List<Long> segmentIds, StructuredTranslationRequest request) {

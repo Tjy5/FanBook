@@ -1,6 +1,7 @@
 package com.fanbook.reader.application;
 
 import com.fanbook.book.application.BookAccessService;
+import com.fanbook.book.application.SegmentInlineMarkup;
 import com.fanbook.book.domain.BookEntity;
 import com.fanbook.book.domain.ChapterEntity;
 import com.fanbook.book.domain.SegmentEntity;
@@ -95,7 +96,7 @@ public class ReaderApplicationService {
                 segment.getSegmentOrder(),
                 segment.getSegmentType().name(),
                 segment.getSourceText(),
-                segment.getTranslatedText(),
+                SegmentInlineMarkup.displayTranslatedText(segment),
                 segment.getStatus().name(),
                 noteRepository.countBySegmentId(segment.getId())
         );

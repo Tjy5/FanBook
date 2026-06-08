@@ -108,6 +108,42 @@ class OpenAiCompatibleProviderTest {
     }
 
     @Test
+    void sendsInlinePlaceholderRulesOnlyWhenRequestContainsPlaceholderTokens() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo("https://fake.example/v1/responses"))
+                .andExpect(content().string(containsString("Inline XHTML placeholder rules")))
+                .andExpect(content().string(containsString("\\\"sourceText\\\":\\\"Hello [id0]bright[id1] world.\\\"")))
+                .andRespond(withSuccess("""
+                        {
+                          "output_text": "{\\"items\\":[{\\"segmentId\\":1,\\"translatedText\\":\\"你好 [id0]明亮[id1] 世界\\"}]}"
+                        }
+                        """, MediaType.APPLICATION_JSON));
+        OpenAiCompatibleProvider provider = new OpenAiCompatibleProvider(
+                builder,
+                JsonMapper.builder().build(),
+                new OpenAiCompatibleProperties(
+                        "https://fake.example/v1",
+                        "test-key",
+                        "gpt-test",
+                        Duration.ofSeconds(30),
+                        2
+                )
+        );
+
+        var result = provider.translateChunk(new StructuredTranslationRequest(
+                "en",
+                "zh",
+                "Demo Book",
+                "Chapter One",
+                List.of(new StructuredTranslationSourceItem(1L, "Hello [id0]bright[id1] world."))
+        ));
+
+        assertThat(result.items().getFirst().translatedText()).isEqualTo("你好 [id0]明亮[id1] 世界");
+        server.verify();
+    }
+
+    @Test
     void sendsDedicatedReviewInstructions() {
         RestClient.Builder builder = RestClient.builder();
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();

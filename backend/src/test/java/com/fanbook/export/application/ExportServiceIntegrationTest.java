@@ -145,6 +145,51 @@ class ExportServiceIntegrationTest {
     }
 
     @Test
+    void exportsInlineMarkupByRestoringPlaceholderStructure() throws Exception {
+        var epub = MinimalEpubFactory.create("""
+                <h1>Chapter One</h1>
+                <p>Hello <em>bright</em> <strong>world</strong> and <a href="https://example.test">Alice</a>.</p>
+                """);
+        var book = bookApplicationService.upload("demo.epub", epub, "en");
+        var job = translationJobService.startWithoutDispatch(
+                book.bookId(),
+                new StartTranslationRequest("mock", "mock-translator"),
+                "system"
+        );
+        translationJobExecutor.runJob(job.jobId());
+
+        var artifact = exportService.exportZh(book.bookId());
+
+        String chapter = unzipText(storageService.read(artifact.getObjectKey())).get("OEBPS/chapter1.xhtml");
+        assertThat(chapter).contains("<em>bright</em>");
+        assertThat(chapter).contains("<strong>world</strong>");
+        assertThat(chapter).contains("<a href=\"https://example.test\">Alice</a>");
+        assertThat(chapter).contains("[zh] Hello ");
+        assertThat(chapter).doesNotContain("[id0]");
+    }
+
+    @Test
+    void exportsBilingualInlineMarkupWithSourceAndTranslatedSiblings() throws Exception {
+        var epub = MinimalEpubFactory.create("""
+                <h1>Chapter One</h1>
+                <p>Hello <em>bright</em> world.</p>
+                """);
+        var book = bookApplicationService.upload("demo.epub", epub, "en");
+        var job = translationJobService.startWithoutDispatch(
+                book.bookId(),
+                new StartTranslationRequest("mock", "mock-translator"),
+                "system"
+        );
+        translationJobExecutor.runJob(job.jobId());
+
+        var artifact = exportService.exportBilingual(book.bookId());
+
+        String chapter = unzipText(storageService.read(artifact.getObjectKey())).get("OEBPS/chapter1.xhtml");
+        assertThat(chapter).contains("<p>Hello <em>bright</em> world.</p><p>[zh] Hello <em>bright</em> world.</p>");
+        assertThat(chapter).doesNotContain("[id0]");
+    }
+
+    @Test
     void generatesJsonConsistencyReport() {
         var book = bookApplicationService.upload("demo.epub", MinimalEpubFactory.create(), "en");
         var job = translationJobService.startWithoutDispatch(

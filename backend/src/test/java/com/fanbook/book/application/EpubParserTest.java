@@ -82,6 +82,74 @@ class EpubParserTest {
     }
 
     @Test
+    void capturesInlineMarkupPlaceholderMetadataForSupportedInlineElements() {
+        ParsedBook book = parser.parse(MinimalEpubFactory.create("""
+                <h1>Chapter One</h1>
+                <p>Hello <em>bright</em> <strong>world</strong> and <a href="https://example.test">Alice</a>.</p>
+                """));
+
+        ParsedSegment paragraph = book.chapters().getFirst().segments().get(1);
+
+        assertThat(paragraph.sourceText()).isEqualTo("Hello bright world and Alice.");
+        assertThat(paragraph.locatorJson()).contains("\"sourceTemplate\"");
+        assertThat(paragraph.locatorJson()).contains("[id0]bright[id1]");
+        assertThat(paragraph.locatorJson()).contains("\"tagName\":\"em\"");
+        assertThat(paragraph.locatorJson()).contains("\"tagName\":\"strong\"");
+        assertThat(paragraph.locatorJson()).contains("\"href\":\"https://example.test\"");
+        assertThat(SegmentInlineMarkup.locator(paragraph.locatorJson()).sourceTemplate())
+                .isEqualTo("Hello [id0]bright[id1] [id2]world[id3] and [id4]Alice[id5].");
+    }
+
+    @Test
+    void leavesUnsupportedBlockMarkupOnLegacyPlainTextPath() {
+        ParsedBook book = parser.parse(MinimalEpubFactory.create("""
+                <h1>Chapter One</h1>
+                <p>Before <img alt="cover" src="cover.jpg"/> after.</p>
+                """));
+
+        ParsedSegment paragraph = book.chapters().getFirst().segments().get(1);
+
+        assertThat(paragraph.sourceText()).isEqualTo("Before after.");
+        assertThat(paragraph.locatorJson()).doesNotContain("\"sourceTemplate\"");
+    }
+
+    @Test
+    void splitsLongParagraphOnPunctuationWhenSentenceBoundariesAreTooLarge() {
+        String longClause = "word ".repeat(250).trim();
+        String paragraph = longClause + ", " + longClause + ", " + longClause;
+
+        ParsedBook book = parser.parse(MinimalEpubFactory.create("""
+                <h1>Chapter One</h1>
+                <p>%s</p>
+                """.formatted(paragraph)));
+
+        List<ParsedSegment> paragraphParts = book.chapters().getFirst().segments().stream()
+                .filter(segment -> segment.segmentType() == SegmentType.PARAGRAPH)
+                .toList();
+        assertThat(paragraphParts).hasSize(3);
+        assertThat(String.join(" ", paragraphParts.stream().map(ParsedSegment::sourceText).toList()))
+                .isEqualTo(paragraph);
+    }
+
+    @Test
+    void splitsLongParagraphOnNewlineWhenPunctuationIsUnavailable() {
+        String line = "word ".repeat(250).trim();
+        String paragraph = line + "\n" + line + "\n" + line;
+
+        ParsedBook book = parser.parse(MinimalEpubFactory.create("""
+                <h1>Chapter One</h1>
+                <p>%s</p>
+                """.formatted(paragraph)));
+
+        List<ParsedSegment> paragraphParts = book.chapters().getFirst().segments().stream()
+                .filter(segment -> segment.segmentType() == SegmentType.PARAGRAPH)
+                .toList();
+        assertThat(paragraphParts).hasSize(3);
+        assertThat(String.join(" ", paragraphParts.stream().map(ParsedSegment::sourceText).toList()))
+                .isEqualTo(SegmentInlineMarkup.normalizeSegmentText(paragraph));
+    }
+
+    @Test
     void rejectsInvalidArchive() {
         assertThatThrownBy(() -> parser.parse("not epub".getBytes()))
                 .isInstanceOf(EpubParserException.class)

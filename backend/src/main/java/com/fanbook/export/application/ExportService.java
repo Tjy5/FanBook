@@ -1,6 +1,7 @@
 package com.fanbook.export.application;
 
 import com.fanbook.book.application.BookAccessService;
+import com.fanbook.book.application.SegmentInlineMarkup;
 import com.fanbook.book.domain.BookEntity;
 import com.fanbook.book.domain.SegmentEntity;
 import com.fanbook.book.domain.SegmentStatus;
@@ -13,8 +14,6 @@ import com.fanbook.export.domain.ExportArtifactEntity;
 import com.fanbook.export.domain.ExportArtifactKind;
 import com.fanbook.export.domain.ExportArtifactStatus;
 import com.fanbook.export.infrastructure.ExportArtifactRepository;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.json.JsonMapper;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
@@ -51,7 +50,6 @@ public class ExportService {
     private final StorageService storageService;
     private final ExportArtifactRepository artifactRepository;
     private final BookAccessService bookAccessService;
-    private final ObjectMapper objectMapper = JsonMapper.builder().build();
 
     public ExportService(
             BookRepository bookRepository,
@@ -157,7 +155,7 @@ public class ExportService {
     private Map<String, List<LocatedSegment>> segmentsByDocPath(List<SegmentEntity> segments) {
         Map<String, List<LocatedSegment>> grouped = new HashMap<>();
         for (SegmentEntity segment : segments) {
-            SegmentLocator locator = locator(segment);
+            SegmentInlineMarkup.Locator locator = locator(segment);
             grouped.computeIfAbsent(locator.docPath(), key -> new ArrayList<>())
                     .add(new LocatedSegment(segment, locator));
         }
@@ -167,9 +165,9 @@ public class ExportService {
         return grouped;
     }
 
-    private SegmentLocator locator(SegmentEntity segment) {
+    private SegmentInlineMarkup.Locator locator(SegmentEntity segment) {
         try {
-            SegmentLocator locator = objectMapper.readValue(segment.getLocatorJson(), SegmentLocator.class);
+            SegmentInlineMarkup.Locator locator = SegmentInlineMarkup.locator(segment.getLocatorJson());
             if (locator.docPath() == null || locator.docPath().isBlank() || locator.index() == null || locator.index() < 0) {
                 throw exportFailed("Invalid locator for segment '" + segment.getId() + "'.");
             }
@@ -202,15 +200,44 @@ public class ExportService {
                 throw exportFailed("Locator mismatch for segment '" + first.segment().getId() + "' in '" + docPath + "'.");
             }
             String translatedText = joinTranslatedText(orderedParts);
-            if (bilingual) {
-                Element translatedElement = (Element) sourceElement.cloneNode(true);
-                translatedElement.setTextContent(translatedText);
-                insertAfter(sourceElement, translatedElement);
-            } else {
-                sourceElement.setTextContent(translatedText);
-            }
+            rewriteElement(doc, sourceElement, first.locator(), translatedText, bilingual, first.segment().getId());
         }
         return serialize(doc);
+    }
+
+    private static void rewriteElement(
+            Document doc,
+            Element sourceElement,
+            SegmentInlineMarkup.Locator locator,
+            String translatedText,
+            boolean bilingual,
+            Long segmentId
+    ) {
+        if (bilingual) {
+            Element translatedElement = (Element) sourceElement.cloneNode(true);
+            applyTranslatedText(doc, translatedElement, locator, translatedText, segmentId);
+            insertAfter(sourceElement, translatedElement);
+        } else {
+            applyTranslatedText(doc, sourceElement, locator, translatedText, segmentId);
+        }
+    }
+
+    private static void applyTranslatedText(
+            Document doc,
+            Element target,
+            SegmentInlineMarkup.Locator locator,
+            String translatedText,
+            Long segmentId
+    ) {
+        if (!locator.hasInlinePlaceholders()) {
+            target.setTextContent(translatedText);
+            return;
+        }
+        try {
+            SegmentInlineMarkup.restoreInlineChildren(doc, target, locator, translatedText);
+        } catch (Exception exception) {
+            throw exportFailed("Inline placeholder restoration failed for segment '" + segmentId + "': " + exception.getMessage());
+        }
     }
 
     private static List<List<LocatedSegment>> groupByElementIndex(List<LocatedSegment> locatedSegments) {
@@ -248,7 +275,7 @@ public class ExportService {
                 .sorted(Comparator.comparingInt(located -> located.locator().partIndex() == null ? -1 : located.locator().partIndex()))
                 .toList();
         for (int i = 0; i < ordered.size(); i++) {
-            SegmentLocator locator = ordered.get(i).locator();
+            SegmentInlineMarkup.Locator locator = ordered.get(i).locator();
             if (locator.partIndex() == null || locator.partCount() == null
                     || !locator.partCount().equals(partCount) || locator.partIndex() != i) {
                 throw exportFailed("Invalid locator part order for segment '" + ordered.get(i).segment().getId() + "'.");
@@ -334,9 +361,6 @@ public class ExportService {
         }
     }
 
-    private record SegmentLocator(String docPath, Integer index, Integer partIndex, Integer partCount) {
-    }
-
-    private record LocatedSegment(SegmentEntity segment, SegmentLocator locator) {
+    private record LocatedSegment(SegmentEntity segment, SegmentInlineMarkup.Locator locator) {
     }
 }

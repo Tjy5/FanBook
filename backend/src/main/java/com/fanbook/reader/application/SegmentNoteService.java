@@ -4,6 +4,7 @@ import com.fanbook.auth.application.CurrentUser;
 import com.fanbook.auth.application.CurrentUserProvider;
 import com.fanbook.auth.domain.UserRole;
 import com.fanbook.book.application.BookAccessService;
+import com.fanbook.book.application.SegmentInlineMarkup;
 import com.fanbook.book.domain.BookEntity;
 import com.fanbook.book.domain.SegmentEntity;
 import com.fanbook.book.infrastructure.SegmentRepository;
@@ -102,7 +103,7 @@ public class SegmentNoteService {
             markdown.append("**Segment ").append(segment.getSegmentOrder()).append("** (").append(createdDate).append(")\n");
             markdown.append("> ").append(segment.getSourceText()).append("\n");
             if (segment.getTranslatedText() != null) {
-                markdown.append("> ").append(segment.getTranslatedText()).append("\n");
+                markdown.append("> ").append(SegmentInlineMarkup.displayTranslatedText(segment)).append("\n");
             }
             markdown.append("\n**Note:** ").append(note.getNoteContent()).append("\n\n");
         }

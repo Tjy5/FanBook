@@ -13,7 +13,15 @@ public class TranslationTextProtector {
     private static final Pattern FOOTNOTE = Pattern.compile("\\[[0-9A-Za-z]+]|\\([0-9A-Za-z]+\\)");
     private static final Pattern INLINE_TAG = Pattern.compile("</?[A-Za-z][^>]{0,120}>");
     private static final Pattern LIST_PREFIX = Pattern.compile("^\\s*(?:[0-9]+[.)]|[A-Za-z][.)]|[-*+])\\s+");
-    private static final Pattern CODE_LIKE = Pattern.compile("`[^`]+`|\\$[^$]+\\$");
+    private static final Pattern CODE_LIKE = Pattern.compile(
+            "(?s)```.+?```|`[^`]+`|\\$[^$]+\\$|\\\\[A-Za-z]+\\{[^}]{1,120}}"
+    );
+    private static final Pattern MEASUREMENT = Pattern.compile(
+            "\\b\\d+(?:\\.\\d+)?\\s?(?:kg|g|mg|km|cm|mm|m|mi|ft|in|mph|km/h|ml|mL|L|KB|MB|GB|Hz|kHz|MHz|GHz|V|W|kW|%)\\b|\\b\\d+(?:\\.\\d+)?\\s?[°℃℉](?:C|F)?\\b"
+    );
+    private static final Pattern TECHNICAL_IDENTIFIER = Pattern.compile(
+            "\\b[A-Z]{2,}[A-Z0-9_-]*\\d+[A-Z0-9_-]*\\b|\\b[A-Za-z]+(?:[._-][A-Za-z0-9]+){2,}\\b"
+    );
 
     public List<String> missingPreservedTokens(String source, String translated, TranslationPreservationOptions options) {
         if (source == null || translated == null) {
@@ -38,6 +46,8 @@ public class TranslationTextProtector {
         }
         if (safe.codeLikeSpans()) {
             addMatches(tokens, CODE_LIKE, source);
+            addMatches(tokens, MEASUREMENT, source);
+            addMatches(tokens, TECHNICAL_IDENTIFIER, source);
         }
         return tokens.stream()
                 .filter(token -> !translated.contains(token))

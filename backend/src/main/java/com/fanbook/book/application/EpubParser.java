@@ -12,6 +12,7 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import javax.xml.XMLConstants;
@@ -94,18 +95,28 @@ public class EpubParser {
             if (!List.of("h1", "h2", "h3", "h4", "h5", "h6", "p", "li", "pre", "figcaption").contains(name)) {
                 continue;
             }
-            String text = element.getTextContent().trim().replaceAll("\\s+", " ");
+            String rawText = element.getTextContent().trim();
+            String text = SegmentInlineMarkup.normalizeSegmentText(rawText);
             if (isNonTranslatable(text)) {
                 continue;
             }
             SegmentType type = segmentType(element, name);
-            String locator = locatorJson(docPath, i);
-            List<String> parts = splitText(text, type);
+            List<String> parts = splitText(rawText, text, type);
+            int elementIndex = i;
+            Optional<SegmentInlineMarkup.InlinePlan> inlinePlan = parts.size() == 1
+                    ? SegmentInlineMarkup.inlinePlan(element, text)
+                    : Optional.empty();
+            String locator = parts.size() == 1
+                    ? inlinePlan
+                    .map(plan -> SegmentInlineMarkup.locatorJson(docPath, elementIndex, plan))
+                    .orElse(SegmentInlineMarkup.locatorJson(docPath, elementIndex))
+                    : SegmentInlineMarkup.locatorJson(docPath, elementIndex);
             for (int partIndex = 0; partIndex < parts.size(); partIndex++) {
                 String part = parts.get(partIndex);
                 int order = result.size() + 1;
-                String partLocator = parts.size() == 1 ? locator : locatorJson(docPath, i, partIndex, parts.size());
-                result.add(new ParsedSegment(order, part, type, partLocator, sha256(part)));
+                String partLocator = parts.size() == 1 ? locator : SegmentInlineMarkup.locatorJson(docPath, elementIndex, partIndex, parts.size());
+                String digestText = inlinePlan.map(SegmentInlineMarkup.InlinePlan::sourceTemplate).orElse(part);
+                result.add(new ParsedSegment(order, part, type, partLocator, sha256(digestText)));
             }
         }
         return result;
@@ -158,32 +169,47 @@ public class EpubParser {
         return false;
     }
 
-    private static List<String> splitText(String text, SegmentType type) {
+    private static List<String> splitText(String rawText, String text, SegmentType type) {
         if (type != SegmentType.PARAGRAPH || text.length() <= LONG_PARAGRAPH_TARGET_CHARACTERS) {
             return List.of(text);
         }
+        List<String> parts = splitByUnits(text, sentences(text), LONG_PARAGRAPH_TARGET_CHARACTERS);
+        if (parts.size() <= 1) {
+            parts = splitByUnits(text, punctuationUnits(text), LONG_PARAGRAPH_TARGET_CHARACTERS);
+        }
+        if (parts.size() <= 1) {
+            parts = splitByUnits(text, newlineUnits(rawText), LONG_PARAGRAPH_TARGET_CHARACTERS);
+        }
+        if (parts.size() <= 1) {
+            parts = splitByWords(text);
+        }
+        if (parts.isEmpty() || !String.join(" ", parts).equals(text)) {
+            return List.of(text);
+        }
+        return List.copyOf(parts);
+    }
+
+    private static List<String> splitByUnits(String original, List<String> units, int targetCharacters) {
+        if (units.size() <= 1 || !String.join(" ", units).equals(original)) {
+            return List.of(original);
+        }
         List<String> parts = new ArrayList<>();
         StringBuilder current = new StringBuilder();
-        for (String sentence : sentences(text)) {
-            if (sentence.length() > LONG_PARAGRAPH_TARGET_CHARACTERS) {
-                appendPart(parts, current);
-                parts.addAll(splitByWords(sentence));
-                continue;
+        for (String unit : units) {
+            if (unit.length() > targetCharacters) {
+                return List.of(original);
             }
             int separator = current.isEmpty() ? 0 : 1;
-            if (!current.isEmpty() && current.length() + separator + sentence.length() > LONG_PARAGRAPH_TARGET_CHARACTERS) {
+            if (!current.isEmpty() && current.length() + separator + unit.length() > targetCharacters) {
                 appendPart(parts, current);
             }
             if (!current.isEmpty()) {
                 current.append(' ');
             }
-            current.append(sentence);
+            current.append(unit);
         }
         appendPart(parts, current);
-        if (parts.isEmpty() || !String.join(" ", parts).equals(text)) {
-            return List.of(text);
-        }
-        return List.copyOf(parts);
+        return parts;
     }
 
     private static List<String> sentences(String text) {
@@ -196,6 +222,39 @@ public class EpubParser {
             if (!sentence.isBlank()) {
                 result.add(sentence);
             }
+        }
+        return result.isEmpty() ? List.of(text) : result;
+    }
+
+    private static List<String> punctuationUnits(String text) {
+        return splitAfterPattern(text, "[,;:，；：、]");
+    }
+
+    private static List<String> newlineUnits(String text) {
+        List<String> result = new ArrayList<>();
+        for (String line : text.split("\\R+")) {
+            String normalized = line.trim().replaceAll("\\s+", " ");
+            if (!normalized.isBlank()) {
+                result.add(normalized);
+            }
+        }
+        return result.isEmpty() ? List.of(text) : result;
+    }
+
+    private static List<String> splitAfterPattern(String text, String boundaryRegex) {
+        List<String> result = new ArrayList<>();
+        var matcher = java.util.regex.Pattern.compile(boundaryRegex).matcher(text);
+        int start = 0;
+        while (matcher.find()) {
+            String unit = text.substring(start, matcher.end()).trim().replaceAll("\\s+", " ");
+            if (!unit.isBlank()) {
+                result.add(unit);
+            }
+            start = matcher.end();
+        }
+        String tail = text.substring(start).trim().replaceAll("\\s+", " ");
+        if (!tail.isBlank()) {
+            result.add(tail);
         }
         return result.isEmpty() ? List.of(text) : result;
     }
@@ -222,15 +281,6 @@ public class EpubParser {
             parts.add(current.toString());
             current.setLength(0);
         }
-    }
-
-    private static String locatorJson(String docPath, int index) {
-        return "{\"docPath\":\"" + docPath + "\",\"index\":" + index + "}";
-    }
-
-    private static String locatorJson(String docPath, int index, int partIndex, int partCount) {
-        return "{\"docPath\":\"" + docPath + "\",\"index\":" + index
-                + ",\"partIndex\":" + partIndex + ",\"partCount\":" + partCount + "}";
     }
 
     private static boolean isNonTranslatable(String text) {

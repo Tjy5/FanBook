@@ -7,6 +7,7 @@ import com.fanbook.ai.domain.StructuredTranslationItem;
 import com.fanbook.ai.domain.StructuredTranslationReviewItem;
 import com.fanbook.ai.domain.StructuredTranslationReviewRequest;
 import com.fanbook.book.application.BookAccessService;
+import com.fanbook.book.application.SegmentInlineMarkup;
 import com.fanbook.book.domain.BookEntity;
 import com.fanbook.book.domain.SegmentEntity;
 import com.fanbook.book.domain.SegmentStatus;
@@ -41,7 +42,8 @@ public class TranslationReviewService {
             "english_residue",
             "suspicious_length_ratio",
             "glossary_term_missing",
-            "preserved_token_missing"
+            "preserved_token_missing",
+            "placeholder_mismatch"
     );
 
     private final BookAccessService bookAccessService;
@@ -127,7 +129,7 @@ public class TranslationReviewService {
         List<StructuredTranslationReviewItem> items = selected.stream()
                 .map(candidate -> new StructuredTranslationReviewItem(
                         candidate.segment().getId(),
-                        candidate.segment().getSourceText(),
+                        SegmentInlineMarkup.providerSourceText(candidate.segment()),
                         candidate.segment().getTranslatedText(),
                         candidate.score(),
                         candidate.warnings()
@@ -153,7 +155,8 @@ public class TranslationReviewService {
                 .collect(Collectors.toMap(StructuredTranslationItem::segmentId, Function.identity()));
         Map<Long, Boolean> updatedById = selected.stream()
                 .collect(Collectors.toMap(candidate -> candidate.segment().getId(), candidate -> {
-                    String reviewed = reviewedById.get(candidate.segment().getId()).translatedText();
+                    String reviewed = reviewedById.get(candidate.segment().getId()).translatedText().trim();
+                    validateInlinePlaceholders(candidate.segment(), reviewed);
                     boolean changed = !reviewed.equals(candidate.segment().getTranslatedText());
                     candidate.segment().markTranslated(reviewed);
                     return changed;
@@ -291,6 +294,20 @@ public class TranslationReviewService {
 
         private static int value(Integer candidate, int fallback) {
             return candidate == null ? fallback : candidate;
+        }
+    }
+
+    private static void validateInlinePlaceholders(SegmentEntity segment, String translated) {
+        SegmentInlineMarkup.PlaceholderValidation validation = SegmentInlineMarkup.validateTranslatedText(
+                translated,
+                segment.getLocatorJson()
+        );
+        if (!validation.valid()) {
+            throw new FanbookException(
+                    ErrorCode.STRUCTURED_OUTPUT_INVALID,
+                    HttpStatus.BAD_GATEWAY,
+                    "Inline placeholder validation failed for segment '" + segment.getId() + "': " + validation.message()
+            );
         }
     }
 }

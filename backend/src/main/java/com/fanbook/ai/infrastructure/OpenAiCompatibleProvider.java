@@ -17,6 +17,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Semaphore;
+import java.util.regex.Pattern;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpHeaders;
@@ -28,6 +29,8 @@ import org.springframework.web.client.RestClient;
 @Component
 @ConditionalOnProperty(name = "fanbook.ai.provider", havingValue = "openai-compatible")
 public class OpenAiCompatibleProvider implements AiTranslationProvider {
+
+    private static final Pattern INLINE_PLACEHOLDER = Pattern.compile("\\[id\\d+\\]");
 
     private static final String STRUCTURED_OUTPUT_INSTRUCTIONS = """
             Translate the source segments into natural, publication-quality target-language prose.
@@ -87,12 +90,20 @@ public class OpenAiCompatibleProvider implements AiTranslationProvider {
 
     @Override
     public StructuredTranslationResult translateChunk(StructuredTranslationRequest request, String modelName) {
-        return sendStructuredTranslationRequest(instructions(STRUCTURED_OUTPUT_INSTRUCTIONS, request.promptProfile(), request.preservation(), "translation"), request, modelName);
+        return sendStructuredTranslationRequest(
+                instructions(STRUCTURED_OUTPUT_INSTRUCTIONS, request.promptProfile(), request.preservation(), "translation", hasInlinePlaceholders(request)),
+                request,
+                modelName
+        );
     }
 
     @Override
     public StructuredTranslationResult reviewTranslations(StructuredTranslationReviewRequest request, String modelName) {
-        return sendStructuredTranslationRequest(instructions(REVIEW_INSTRUCTIONS, request.promptProfile(), request.preservation(), "review"), request, modelName);
+        return sendStructuredTranslationRequest(
+                instructions(REVIEW_INSTRUCTIONS, request.promptProfile(), request.preservation(), "review", hasInlinePlaceholders(request)),
+                request,
+                modelName
+        );
     }
 
     @Override
@@ -103,7 +114,7 @@ public class OpenAiCompatibleProvider implements AiTranslationProvider {
             String resolvedModelName = modelName == null || modelName.isBlank() ? properties.model() : modelName;
             Map<String, Object> payload = Map.of(
                     "model", resolvedModelName,
-                    "instructions", instructions(ANALYSIS_INSTRUCTIONS, request.promptProfile(), request.preservation(), "analysis"),
+                    "instructions", instructions(ANALYSIS_INSTRUCTIONS, request.promptProfile(), request.preservation(), "analysis", false),
                     "input", objectMapper.writeValueAsString(request)
             );
             String body = restClient.post()
@@ -164,7 +175,8 @@ public class OpenAiCompatibleProvider implements AiTranslationProvider {
             String base,
             TranslationPromptProfile profile,
             TranslationPreservationOptions preservation,
-            String task
+            String task,
+            boolean hasInlinePlaceholders
     ) {
         TranslationPromptProfile safeProfile = profile == null ? TranslationPromptProfile.defaults() : profile;
         List<String> parts = new ArrayList<>();
@@ -183,7 +195,36 @@ public class OpenAiCompatibleProvider implements AiTranslationProvider {
         if (safeProfile.preserveFormatting()) {
             parts.add("Preservation rules:\n" + preservationInstructions(preservation));
         }
+        if (hasInlinePlaceholders) {
+            parts.add("""
+                    Inline XHTML placeholder rules:
+                    Tokens like [id0], [id1], [id2] represent protected inline structure from the EPUB.
+                    Copy every such token exactly once, in the same relative order, into the translatedText for its own segment.
+                    Translate only the surrounding natural language; never translate, rename, delete, duplicate, or move these tokens across segment boundaries.
+                    """.strip());
+        }
         return String.join("\n\n", parts);
+    }
+
+    private static boolean hasInlinePlaceholders(StructuredTranslationRequest request) {
+        if (request == null) {
+            return false;
+        }
+        return request.items().stream().anyMatch(item -> containsInlinePlaceholder(item.sourceText()))
+                || request.context().stream().anyMatch(item ->
+                containsInlinePlaceholder(item.sourceText()) || containsInlinePlaceholder(item.translatedText()));
+    }
+
+    private static boolean hasInlinePlaceholders(StructuredTranslationReviewRequest request) {
+        if (request == null) {
+            return false;
+        }
+        return request.items().stream().anyMatch(item ->
+                containsInlinePlaceholder(item.sourceText()) || containsInlinePlaceholder(item.translatedText()));
+    }
+
+    private static boolean containsInlinePlaceholder(String text) {
+        return text != null && INLINE_PLACEHOLDER.matcher(text).find();
     }
 
     private static String preservationInstructions(TranslationPreservationOptions preservation) {
