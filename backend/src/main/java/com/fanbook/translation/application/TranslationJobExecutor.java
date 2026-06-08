@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fanbook.ai.application.StructuredTranslationValidator;
 import com.fanbook.ai.domain.AiTranslationProvider;
+import com.fanbook.ai.domain.StructuredTranslationGlossaryItem;
 import com.fanbook.ai.domain.StructuredTranslationItem;
 import com.fanbook.ai.domain.StructuredTranslationRequest;
 import com.fanbook.ai.domain.StructuredTranslationSourceItem;
@@ -14,6 +15,7 @@ import com.fanbook.book.infrastructure.SegmentRepository;
 import com.fanbook.common.error.ErrorCode;
 import com.fanbook.common.error.FanbookException;
 import com.fanbook.common.lock.BookTranslationLock;
+import com.fanbook.translation.config.TranslationChunkPlanningProperties;
 import com.fanbook.translation.domain.TranslationChunkEntity;
 import com.fanbook.translation.domain.TranslationChunkStatus;
 import com.fanbook.translation.domain.TranslationJobEntity;
@@ -41,6 +43,8 @@ public class TranslationJobExecutor {
     private final BookTranslationLock lock;
     private final TransactionTemplate transactionTemplate;
     private final int maxAttemptsPerChunk;
+    private final TranslationChunkPlanningProperties chunkPlanningProperties;
+    private final TranslationGlossaryBuilder glossaryBuilder = new TranslationGlossaryBuilder();
     private final ObjectMapper objectMapper = JsonMapper.builder().build();
 
     public TranslationJobExecutor(
@@ -51,6 +55,7 @@ public class TranslationJobExecutor {
             StructuredTranslationValidator validator,
             BookTranslationLock lock,
             TransactionTemplate transactionTemplate,
+            TranslationChunkPlanningProperties chunkPlanningProperties,
             @Value("${fanbook.translation.max-attempts-per-chunk:3}") int maxAttemptsPerChunk
     ) {
         this.jobRepository = jobRepository;
@@ -60,6 +65,7 @@ public class TranslationJobExecutor {
         this.validator = validator;
         this.lock = lock;
         this.transactionTemplate = transactionTemplate;
+        this.chunkPlanningProperties = chunkPlanningProperties;
         this.maxAttemptsPerChunk = maxAttemptsPerChunk;
     }
 
@@ -164,6 +170,11 @@ public class TranslationJobExecutor {
                     })
                     .toList();
             SegmentEntity first = segmentById.get(segmentIds.getFirst());
+            List<StructuredTranslationGlossaryItem> glossary = glossaryBuilder.build(
+                    chunkPlanningProperties.glossary(),
+                    requestTexts(first, items),
+                    chunkPlanningProperties.glossaryCandidateLimit()
+            );
             return new ChunkWork(
                     segmentIds,
                     new StructuredTranslationRequest(
@@ -171,10 +182,20 @@ public class TranslationJobExecutor {
                             "zh",
                             first.getBook().getTitle(),
                             first.getChapter().getTitle(),
+                            List.of(),
+                            glossary,
                             items
                     )
             );
         });
+    }
+
+    private static List<String> requestTexts(SegmentEntity first, List<StructuredTranslationSourceItem> items) {
+        List<String> texts = new java.util.ArrayList<>();
+        texts.add(first.getBook().getTitle());
+        texts.add(first.getChapter().getTitle());
+        items.forEach(item -> texts.add(item.sourceText()));
+        return texts;
     }
 
     private void refreshProgress(Long jobId) {

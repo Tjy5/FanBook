@@ -2,15 +2,25 @@ package com.fanbook.translation.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.fanbook.ai.domain.AiTranslationProvider;
+import com.fanbook.ai.domain.StructuredTranslationItem;
+import com.fanbook.ai.domain.StructuredTranslationRequest;
+import com.fanbook.ai.domain.StructuredTranslationResult;
 import com.fanbook.book.application.BookApplicationService;
+import com.fanbook.book.domain.SegmentEntity;
 import com.fanbook.book.infrastructure.SegmentRepository;
 import com.fanbook.testsupport.MinimalEpubFactory;
 import com.fanbook.translation.api.StartTranslationRequest;
+import com.fanbook.translation.domain.TranslationChunkEntity;
 import com.fanbook.translation.domain.TranslationChunkStatus;
 import com.fanbook.translation.infrastructure.TranslationChunkRepository;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
@@ -24,6 +34,13 @@ class TranslationChunkWorkerTest {
         registry.add("spring.jpa.database-platform", () -> "org.hibernate.dialect.H2Dialect");
         registry.add("fanbook.storage.root", () -> "target/translation-chunk-worker-storage");
         registry.add("fanbook.ai.provider", () -> "mock");
+        registry.add("fanbook.translation.max-segments-per-chunk", () -> 2);
+        registry.add("fanbook.translation.context-window-segments", () -> 2);
+        registry.add("fanbook.translation.glossary-candidate-limit", () -> 6);
+        registry.add("fanbook.translation.glossary[0].source-term", () -> "Alice");
+        registry.add("fanbook.translation.glossary[0].target-term", () -> "艾丽丝");
+        registry.add("fanbook.translation.glossary[0].category", () -> "person");
+        registry.add("fanbook.translation.glossary[0].note", () -> "Use this name consistently.");
     }
 
     @Autowired
@@ -44,6 +61,9 @@ class TranslationChunkWorkerTest {
     @Autowired
     TranslationChunkWorker worker;
 
+    @Autowired
+    CapturingProvider capturingProvider;
+
     @Test
     void translatesChunkUsingJobProviderAndModelWithoutCompletingChunk() {
         var book = bookApplicationService.upload("demo.epub", MinimalEpubFactory.create(), "en");
@@ -52,14 +72,86 @@ class TranslationChunkWorkerTest {
                 new StartTranslationRequest("mock", "custom-model"),
                 "system"
         );
-        var chunk = chunkRepository.findByJobIdOrderByChunkOrderAsc(job.jobId()).getFirst();
-        assertThat(stateService.tryAcquire(chunk.getId(), "worker-test")).isTrue();
+        var chunks = chunkRepository.findByJobIdOrderByChunkOrderAsc(job.jobId());
+        var chunk = chunks.getFirst();
 
-        worker.execute(chunk.getId());
+        for (TranslationChunkEntity pendingChunk : chunks) {
+            execute(pendingChunk);
+        }
 
         assertThat(chunkRepository.findById(chunk.getId()).orElseThrow().getStatus())
                 .isEqualTo(TranslationChunkStatus.RUNNING);
         assertThat(segmentRepository.findByBookIdOrderByChapterIdAscSegmentOrderAsc(book.bookId()))
                 .allSatisfy(segment -> assertThat(segment.getTranslatedText()).startsWith("[zh] "));
+    }
+
+    @Test
+    void sendsPriorSameChapterTranslationsAsContextForLaterChunk() {
+        var book = bookApplicationService.upload("demo.epub", MinimalEpubFactory.create(), "en");
+        var job = translationJobService.startWithoutDispatch(
+                book.bookId(),
+                new StartTranslationRequest("capture", "capture-model"),
+                "system"
+        );
+        List<TranslationChunkEntity> chunks = chunkRepository.findByJobIdOrderByChunkOrderAsc(job.jobId());
+        assertThat(chunks).hasSize(2);
+
+        execute(chunks.get(0));
+        capturingProvider.clear();
+        execute(chunks.get(1));
+
+        StructuredTranslationRequest request = capturingProvider.lastRequest();
+        assertThat(request.context())
+                .extracting(context -> context.sourceText())
+                .containsExactly("Chapter One", "Hello world.");
+        assertThat(request.items())
+                .extracting(item -> item.sourceText())
+                .containsExactly("Alice went to Wonderland.");
+        assertThat(request.glossary())
+                .anySatisfy(item -> {
+                    assertThat(item.sourceTerm()).isEqualTo("Alice");
+                    assertThat(item.targetTerm()).isEqualTo("艾丽丝");
+                })
+                .anySatisfy(item -> assertThat(item.sourceTerm()).isEqualTo("Wonderland"));
+    }
+
+    private void execute(TranslationChunkEntity chunk) {
+        assertThat(stateService.tryAcquire(chunk.getId(), "worker-test-" + chunk.getId())).isTrue();
+        worker.execute(chunk.getId());
+    }
+
+    @TestConfiguration
+    static class WorkerConfig {
+        @Bean
+        @Primary
+        CapturingProvider capturingProvider() {
+            return new CapturingProvider();
+        }
+    }
+
+    static class CapturingProvider implements AiTranslationProvider {
+        private StructuredTranslationRequest lastRequest;
+
+        @Override
+        public String name() {
+            return "capture";
+        }
+
+        @Override
+        public StructuredTranslationResult translateChunk(StructuredTranslationRequest request, String modelName) {
+            lastRequest = request;
+            List<StructuredTranslationItem> items = request.items().stream()
+                    .map(item -> new StructuredTranslationItem(item.segmentId(), "[zh] " + item.sourceText()))
+                    .toList();
+            return new StructuredTranslationResult(items, name(), modelName);
+        }
+
+        StructuredTranslationRequest lastRequest() {
+            return lastRequest;
+        }
+
+        void clear() {
+            lastRequest = null;
+        }
     }
 }

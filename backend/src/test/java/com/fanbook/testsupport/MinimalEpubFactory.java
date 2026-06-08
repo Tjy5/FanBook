@@ -12,6 +12,14 @@ public final class MinimalEpubFactory {
     }
 
     public static byte[] create() {
+        return create("""
+                <h1>Chapter One</h1>
+                <p>Hello world.</p>
+                <p>Alice went to Wonderland.</p>
+                """);
+    }
+
+    public static byte[] create(String bodyContent) {
         try {
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             try (ZipOutputStream zip = new ZipOutputStream(out, StandardCharsets.UTF_8)) {
@@ -42,12 +50,10 @@ public final class MinimalEpubFactory {
                         <html xmlns="http://www.w3.org/1999/xhtml">
                           <head><title>Chapter One</title></head>
                           <body>
-                            <h1>Chapter One</h1>
-                            <p>Hello world.</p>
-                            <p>Alice went to Wonderland.</p>
+                            %s
                           </body>
                         </html>
-                        """);
+                        """.formatted(bodyContent));
             }
             return out.toByteArray();
         } catch (IOException e) {

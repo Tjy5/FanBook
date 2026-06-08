@@ -195,6 +195,40 @@ function routeAuthenticatedRequest(request, response, path, account) {
     sendJson(response, 200, { chapterId: 1, chapterTitle: "A Room Full of Marginalia", segments });
     return;
   }
+  if (path === "/books/42/translation-review" && request.method === "POST") {
+    sendJson(response, 200, {
+      bookId: 42,
+      providerName: "openai-compatible",
+      modelName: "gpt-5",
+      applied: true,
+      minScore: 80,
+      maxSegments: 20,
+      warningCodes: ["source_repeated_in_translation", "english_residue", "glossary_term_missing"],
+      candidateSegments: 3,
+      selectedSegments: 2,
+      reviewedSegments: 2,
+      updatedSegments: 1,
+      segments: [
+        {
+          segmentId: 1001,
+          segmentOrder: 1,
+          score: 45,
+          warnings: ["source_repeated_in_translation"],
+          reviewed: true,
+          updated: true,
+        },
+        {
+          segmentId: 1002,
+          segmentOrder: 2,
+          score: 75,
+          warnings: ["english_residue"],
+          reviewed: true,
+          updated: false,
+        },
+      ],
+    });
+    return;
+  }
   if (path === "/segments/1001/notes") {
     sendJson(response, 200, notes);
     return;

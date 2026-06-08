@@ -14,11 +14,14 @@ import com.fanbook.export.domain.ExportArtifactEntity;
 import com.fanbook.export.domain.ExportArtifactKind;
 import com.fanbook.export.domain.ExportArtifactStatus;
 import com.fanbook.export.infrastructure.ExportArtifactRepository;
+import com.fanbook.translation.application.TranslationQualityAnalyzer;
+import com.fanbook.translation.application.TranslationQualityAnalyzer.ConsistencyWarning;
+import com.fanbook.translation.application.TranslationQualityAnalyzer.SegmentQualityScore;
+import com.fanbook.translation.config.TranslationChunkPlanningProperties;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.List;
-import java.util.Map;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,6 +34,8 @@ public class ConsistencyReportService {
     private final StorageService storageService;
     private final ExportArtifactRepository artifactRepository;
     private final BookAccessService bookAccessService;
+    private final TranslationChunkPlanningProperties chunkPlanningProperties;
+    private final TranslationQualityAnalyzer qualityAnalyzer = new TranslationQualityAnalyzer();
     private final ObjectMapper objectMapper = JsonMapper.builder().build();
 
     public ConsistencyReportService(
@@ -38,13 +43,15 @@ public class ConsistencyReportService {
             SegmentRepository segmentRepository,
             StorageService storageService,
             ExportArtifactRepository artifactRepository,
-            BookAccessService bookAccessService
+            BookAccessService bookAccessService,
+            TranslationChunkPlanningProperties chunkPlanningProperties
     ) {
         this.bookRepository = bookRepository;
         this.segmentRepository = segmentRepository;
         this.storageService = storageService;
         this.artifactRepository = artifactRepository;
         this.bookAccessService = bookAccessService;
+        this.chunkPlanningProperties = chunkPlanningProperties;
     }
 
     @Transactional
@@ -57,12 +64,15 @@ public class ConsistencyReportService {
     public ExportArtifactEntity generateJson(Long bookId) {
         ReportStats stats = stats(bookId);
         try {
-            byte[] content = objectMapper.writeValueAsBytes(Map.of(
-                    "bookId", bookId,
-                    "totalSegments", stats.totalSegments(),
-                    "translatedSegments", stats.translatedSegments(),
-                    "failedSegments", stats.failedSegments(),
-                    "termWarnings", List.of()
+            byte[] content = objectMapper.writeValueAsBytes(new ReportData(
+                    bookId,
+                    stats.totalSegments(),
+                    stats.translatedSegments(),
+                    stats.failedSegments(),
+                    stats.qualityScore(),
+                    stats.segmentScores(),
+                    stats.warnings(),
+                    stats.termWarnings()
             ));
             return store(bookId, ExportArtifactKind.CONSISTENCY_REPORT_JSON, "consistency.json", content);
         } catch (Exception exception) {
@@ -79,16 +89,54 @@ public class ConsistencyReportService {
     @Transactional
     public ExportArtifactEntity generateMarkdown(Long bookId) {
         ReportStats stats = stats(bookId);
-        String markdown = """
+        StringBuilder markdown = new StringBuilder("""
                 # Consistency Report
 
                 - Book ID: %d
                 - Total segments: %d
                 - Translated segments: %d
                 - Failed segments: %d
-                - Term warnings: 0
-                """.formatted(bookId, stats.totalSegments(), stats.translatedSegments(), stats.failedSegments());
-        return store(bookId, ExportArtifactKind.CONSISTENCY_REPORT_MD, "consistency.md", markdown.getBytes(StandardCharsets.UTF_8));
+                - Quality score: %d
+                - Warnings: %d
+                - Term warnings: %d
+                """.formatted(
+                bookId,
+                stats.totalSegments(),
+                stats.translatedSegments(),
+                stats.failedSegments(),
+                stats.qualityScore(),
+                stats.warnings().size(),
+                stats.termWarnings().size()
+        ));
+        if (stats.warnings().isEmpty()) {
+            markdown.append("\nNo warnings.\n");
+        } else {
+            markdown.append("\n## Warnings\n\n");
+            for (ConsistencyWarning warning : stats.warnings()) {
+                markdown.append("- [")
+                        .append(warning.severity())
+                        .append("] ")
+                        .append(warning.code())
+                        .append(" segment ")
+                        .append(warning.segmentId())
+                        .append(": ")
+                        .append(warning.message())
+                        .append("\n");
+            }
+        }
+        markdown.append("\n## Segment Scores\n\n");
+        for (SegmentQualityScore score : stats.segmentScores()) {
+            markdown.append("- Segment ")
+                    .append(score.segmentId())
+                    .append(": ")
+                    .append(score.score())
+                    .append("/100");
+            if (!score.reasons().isEmpty()) {
+                markdown.append(" (").append(String.join(", ", score.reasons())).append(")");
+            }
+            markdown.append("\n");
+        }
+        return store(bookId, ExportArtifactKind.CONSISTENCY_REPORT_MD, "consistency.md", markdown.toString().getBytes(StandardCharsets.UTF_8));
     }
 
     @Transactional(readOnly = true)
@@ -115,7 +163,16 @@ public class ConsistencyReportService {
         List<SegmentEntity> segments = segmentRepository.findByBookIdOrderByChapterIdAscSegmentOrderAsc(bookId);
         int translated = (int) segments.stream().filter(segment -> segment.getStatus() == SegmentStatus.TRANSLATED).count();
         int failed = (int) segments.stream().filter(segment -> segment.getStatus() == SegmentStatus.FAILED).count();
-        return new ReportStats(segments.size(), translated, failed);
+        var analysis = qualityAnalyzer.analyze(segments, chunkPlanningProperties.glossary());
+        return new ReportStats(
+                segments.size(),
+                translated,
+                failed,
+                analysis.qualityScore(),
+                analysis.segmentScores(),
+                analysis.warnings(),
+                analysis.termWarnings()
+        );
     }
 
     private ExportArtifactEntity store(Long bookId, ExportArtifactKind kind, String filename, byte[] content) {
@@ -136,6 +193,27 @@ public class ConsistencyReportService {
         }
     }
 
-    private record ReportStats(int totalSegments, int translatedSegments, int failedSegments) {
+    private record ReportStats(
+            int totalSegments,
+            int translatedSegments,
+            int failedSegments,
+            int qualityScore,
+            List<SegmentQualityScore> segmentScores,
+            List<ConsistencyWarning> warnings,
+            List<ConsistencyWarning> termWarnings
+    ) {
     }
+
+    private record ReportData(
+            Long bookId,
+            int totalSegments,
+            int translatedSegments,
+            int failedSegments,
+            int qualityScore,
+            List<SegmentQualityScore> segmentScores,
+            List<ConsistencyWarning> warnings,
+            List<ConsistencyWarning> termWarnings
+    ) {
+    }
+
 }

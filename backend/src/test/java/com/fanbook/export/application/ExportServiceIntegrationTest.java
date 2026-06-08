@@ -36,6 +36,10 @@ class ExportServiceIntegrationTest {
         registry.add("spring.jpa.database-platform", () -> "org.hibernate.dialect.H2Dialect");
         registry.add("fanbook.storage.root", () -> "target/export-service-storage");
         registry.add("fanbook.ai.provider", () -> "mock");
+        registry.add("fanbook.translation.glossary[0].source-term", () -> "Alice");
+        registry.add("fanbook.translation.glossary[0].target-term", () -> "艾丽丝");
+        registry.add("fanbook.translation.glossary[0].category", () -> "person");
+        registry.add("fanbook.translation.glossary[0].note", () -> "Use this name consistently.");
     }
 
     @Autowired
@@ -74,6 +78,70 @@ class ExportServiceIntegrationTest {
                 .isEqualTo(artifact.getId());
         Map<String, String> zip = unzipText(storageService.read(artifact.getObjectKey()));
         assertThat(zip.get("OEBPS/chapter1.xhtml")).contains("[zh] Hello world.");
+        assertThat(zip.get("OEBPS/chapter1.xhtml")).contains("<title>Chapter One</title>");
+    }
+
+    @Test
+    void exportsTranslatedBookByLocatorWithoutGlobalTextReplacement() throws Exception {
+        var epub = MinimalEpubFactory.create("""
+                <h1>Chapter One</h1>
+                <p>Hello world.</p>
+                <p>The phrase Hello world. appears inside this sentence.</p>
+                """);
+        var book = bookApplicationService.upload("demo.epub", epub, "en");
+        var job = translationJobService.startWithoutDispatch(
+                book.bookId(),
+                new StartTranslationRequest("mock", "mock-translator"),
+                "system"
+        );
+        translationJobExecutor.runJob(job.jobId());
+
+        var artifact = exportService.exportZh(book.bookId());
+
+        String chapter = unzipText(storageService.read(artifact.getObjectKey())).get("OEBPS/chapter1.xhtml");
+        assertThat(chapter).contains("[zh] Hello world.");
+        assertThat(chapter).contains("[zh] The phrase Hello world. appears inside this sentence.");
+        assertThat(chapter).doesNotContain("The phrase [zh] Hello world. appears inside this sentence.");
+    }
+
+    @Test
+    void exportsBilingualBookByInsertingTranslatedSiblingElements() throws Exception {
+        var book = bookApplicationService.upload("demo.epub", MinimalEpubFactory.create(), "en");
+        var job = translationJobService.startWithoutDispatch(
+                book.bookId(),
+                new StartTranslationRequest("mock", "mock-translator"),
+                "system"
+        );
+        translationJobExecutor.runJob(job.jobId());
+
+        var artifact = exportService.exportBilingual(book.bookId());
+
+        String chapter = unzipText(storageService.read(artifact.getObjectKey())).get("OEBPS/chapter1.xhtml");
+        assertThat(chapter).contains("<p>Hello world.</p><p>[zh] Hello world.</p>");
+        assertThat(chapter).contains("<p>Alice went to Wonderland.</p><p>[zh] Alice went to Wonderland.</p>");
+    }
+
+    @Test
+    void exportsLongParagraphPartsBackIntoOneLocatedElement() throws Exception {
+        String longParagraph = longParagraph();
+        var epub = MinimalEpubFactory.create("""
+                <h1>Chapter One</h1>
+                <p>%s</p>
+                """.formatted(longParagraph));
+        var book = bookApplicationService.upload("demo.epub", epub, "en");
+        var job = translationJobService.startWithoutDispatch(
+                book.bookId(),
+                new StartTranslationRequest("mock", "mock-translator"),
+                "system"
+        );
+        translationJobExecutor.runJob(job.jobId());
+
+        var artifact = exportService.exportZh(book.bookId());
+
+        String chapter = unzipText(storageService.read(artifact.getObjectKey())).get("OEBPS/chapter1.xhtml");
+        assertThat(chapter).contains("<p>[zh] This sentence gives the parser a natural boundary for semantic splitting.");
+        assertThat(chapter).contains("</p>");
+        assertThat(chapter).doesNotContain("</p><p>[zh] This sentence gives the parser");
     }
 
     @Test
@@ -91,6 +159,34 @@ class ExportServiceIntegrationTest {
         String json = new String(storageService.read(report.getObjectKey()), StandardCharsets.UTF_8);
         assertThat(json).contains("\"bookId\":" + book.bookId());
         assertThat(json).contains("\"translatedSegments\":3");
+        assertThat(json).contains("\"qualityScore\"");
+        assertThat(json).contains("\"segmentScores\"");
+        assertThat(json).contains("\"warnings\"");
+        assertThat(json).contains("\"termWarnings\"");
+        assertThat(json).contains("\"source_repeated_in_translation\"");
+        assertThat(json).contains("\"english_residue\"");
+        assertThat(json).contains("\"glossary_term_missing\"");
+    }
+
+    @Test
+    void generatesMarkdownConsistencyReportWithWarnings() {
+        var book = bookApplicationService.upload("demo.epub", MinimalEpubFactory.create(), "en");
+        var job = translationJobService.startWithoutDispatch(
+                book.bookId(),
+                new StartTranslationRequest("mock", "mock-translator"),
+                "system"
+        );
+        translationJobExecutor.runJob(job.jobId());
+
+        var report = reportService.generateMarkdown(book.bookId());
+
+        String markdown = new String(storageService.read(report.getObjectKey()), StandardCharsets.UTF_8);
+        assertThat(markdown).contains("- Warnings:");
+        assertThat(markdown).contains("- Quality score:");
+        assertThat(markdown).contains("## Segment Scores");
+        assertThat(markdown).contains("## Warnings");
+        assertThat(markdown).contains("source_repeated_in_translation");
+        assertThat(markdown).contains("glossary_term_missing");
     }
 
     private static Map<String, String> unzipText(byte[] content) throws Exception {
@@ -104,6 +200,10 @@ class ExportServiceIntegrationTest {
             }
         }
         return result;
+    }
+
+    private static String longParagraph() {
+        return "This sentence gives the parser a natural boundary for semantic splitting. ".repeat(80).trim();
     }
 
     @TestConfiguration

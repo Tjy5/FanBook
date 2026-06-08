@@ -3,6 +3,7 @@ package com.fanbook.translation.api;
 import static org.assertj.core.api.Assertions.assertThat;
 import static com.fanbook.testsupport.SecurityMockMvcSupport.csrfToken;
 import static com.fanbook.testsupport.SecurityMockMvcSupport.member;
+import static com.fanbook.testsupport.SecurityMockMvcSupport.viewer;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -101,6 +102,50 @@ class TranslationJobControllerIntegrationTest {
                 .andExpect(jsonPath("$.jobId").value(jobId))
                 .andReturn().getResponse().getContentAsString();
         assertThat(Set.of("QUEUED", "RUNNING", "COMPLETED")).contains(objectMapper.readTree(readBody).get("status").asText());
+    }
+
+    @Test
+    void previewsTranslationReviewForMember() throws Exception {
+        Long bookId = uploadBook();
+
+        mockMvc.perform(post("/api/books/" + bookId + "/translation-review")
+                        .with(memberUser())
+                        .with(csrfToken())
+                        .contentType("application/json")
+                        .content("{\"maxSegments\":5,\"minScore\":80,\"applyChanges\":false}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.bookId").value(bookId))
+                .andExpect(jsonPath("$.applied").value(false))
+                .andExpect(jsonPath("$.maxSegments").value(5))
+                .andExpect(jsonPath("$.minScore").value(80))
+                .andExpect(jsonPath("$.candidateSegments").value(0))
+                .andExpect(jsonPath("$.selectedSegments").value(0));
+    }
+
+    @Test
+    void translationReviewRequiresMemberRoleAndCsrf() throws Exception {
+        Long bookId = uploadBook();
+
+        mockMvc.perform(post("/api/books/" + bookId + "/translation-review")
+                        .with(memberUser())
+                        .contentType("application/json")
+                        .content("{\"applyChanges\":false}"))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(post("/api/books/" + bookId + "/translation-review")
+                        .with(viewer())
+                        .with(csrfToken())
+                        .contentType("application/json")
+                        .content("{\"applyChanges\":false}"))
+                .andExpect(status().isForbidden());
+    }
+
+    private Long uploadBook() throws Exception {
+        MockMultipartFile file = new MockMultipartFile("file", "demo.epub", "application/epub+zip", MinimalEpubFactory.create());
+        String uploadBody = mockMvc.perform(multipart("/api/books").file(file).param("sourceLanguage", "en").with(memberUser()).with(csrfToken()))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        return objectMapper.readTree(uploadBody).get("bookId").asLong();
     }
 
     private RequestPostProcessor memberUser() {

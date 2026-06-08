@@ -13,19 +13,35 @@ import com.fanbook.export.domain.ExportArtifactEntity;
 import com.fanbook.export.domain.ExportArtifactKind;
 import com.fanbook.export.domain.ExportArtifactStatus;
 import com.fanbook.export.infrastructure.ExportArtifactRepository;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.json.JsonMapper;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
+import javax.xml.XMLConstants;
+import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.transform.OutputKeys;
+import javax.xml.transform.TransformerFactory;
+import javax.xml.transform.dom.DOMSource;
+import javax.xml.transform.stream.StreamResult;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
 
 @Service
 public class ExportService {
@@ -35,6 +51,7 @@ public class ExportService {
     private final StorageService storageService;
     private final ExportArtifactRepository artifactRepository;
     private final BookAccessService bookAccessService;
+    private final ObjectMapper objectMapper = JsonMapper.builder().build();
 
     public ExportService(
             BookRepository bookRepository,
@@ -93,7 +110,9 @@ public class ExportService {
         BookEntity book = bookRepository.findById(bookId)
                 .orElseThrow(() -> new FanbookException(ErrorCode.BOOK_NOT_FOUND, HttpStatus.NOT_FOUND, "Book '" + bookId + "' was not found."));
         List<SegmentEntity> segments = segmentRepository.findByBookIdOrderByChapterIdAscSegmentOrderAsc(bookId);
-        if (segments.isEmpty() || segments.stream().anyMatch(segment -> segment.getStatus() != SegmentStatus.TRANSLATED || segment.getTranslatedText() == null)) {
+        if (segments.isEmpty() || segments.stream().anyMatch(segment -> segment.getStatus() != SegmentStatus.TRANSLATED
+                || segment.getTranslatedText() == null
+                || segment.getTranslatedText().isBlank())) {
             throw new FanbookException(ErrorCode.EXPORT_NOT_READY, HttpStatus.CONFLICT, "Book '" + bookId + "' is not fully translated.");
         }
 
@@ -108,6 +127,7 @@ public class ExportService {
 
     private byte[] rewriteEpub(byte[] source, List<SegmentEntity> segments, boolean bilingual) {
         try {
+            Map<String, List<LocatedSegment>> segmentsByDocPath = segmentsByDocPath(segments);
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(source), StandardCharsets.UTF_8);
                  ZipOutputStream rewritten = new ZipOutputStream(out, StandardCharsets.UTF_8)) {
@@ -115,27 +135,195 @@ public class ExportService {
                 while ((entry = zip.getNextEntry()) != null) {
                     rewritten.putNextEntry(new ZipEntry(entry.getName()));
                     byte[] bytes = zip.readAllBytes();
-                    if (!entry.isDirectory() && entry.getName().endsWith(".xhtml")) {
-                        String text = new String(bytes, StandardCharsets.UTF_8);
-                        for (SegmentEntity segment : segments.stream()
-                                .sorted(Comparator.comparing((SegmentEntity segment) -> segment.getChapter().getId())
-                                        .thenComparingInt(SegmentEntity::getSegmentOrder))
-                                .toList()) {
-                            String replacement = bilingual
-                                    ? segment.getSourceText() + "\n" + segment.getTranslatedText()
-                                    : segment.getTranslatedText();
-                            text = text.replace(segment.getSourceText(), replacement);
-                        }
-                        bytes = text.getBytes(StandardCharsets.UTF_8);
+                    String docPath = entry.getName().replace('\\', '/');
+                    if (!entry.isDirectory() && segmentsByDocPath.containsKey(docPath)) {
+                        bytes = rewriteXhtml(bytes, docPath, segmentsByDocPath.remove(docPath), bilingual);
                     }
                     rewritten.write(bytes);
                     rewritten.closeEntry();
                 }
             }
+            if (!segmentsByDocPath.isEmpty()) {
+                throw exportFailed("Source EPUB is missing XHTML document(s): " + segmentsByDocPath.keySet());
+            }
             return out.toByteArray();
+        } catch (FanbookException exception) {
+            throw exception;
         } catch (Exception exception) {
             throw new FanbookException(ErrorCode.EXPORT_FAILED, HttpStatus.INTERNAL_SERVER_ERROR, exception.getMessage());
         }
+    }
+
+    private Map<String, List<LocatedSegment>> segmentsByDocPath(List<SegmentEntity> segments) {
+        Map<String, List<LocatedSegment>> grouped = new HashMap<>();
+        for (SegmentEntity segment : segments) {
+            SegmentLocator locator = locator(segment);
+            grouped.computeIfAbsent(locator.docPath(), key -> new ArrayList<>())
+                    .add(new LocatedSegment(segment, locator));
+        }
+        grouped.values().forEach(list -> list.sort(Comparator
+                .comparingInt((LocatedSegment located) -> located.locator().index())
+                .thenComparingInt(located -> located.locator().partIndex() == null ? -1 : located.locator().partIndex())));
+        return grouped;
+    }
+
+    private SegmentLocator locator(SegmentEntity segment) {
+        try {
+            SegmentLocator locator = objectMapper.readValue(segment.getLocatorJson(), SegmentLocator.class);
+            if (locator.docPath() == null || locator.docPath().isBlank() || locator.index() == null || locator.index() < 0) {
+                throw exportFailed("Invalid locator for segment '" + segment.getId() + "'.");
+            }
+            return locator;
+        } catch (FanbookException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw exportFailed("Invalid locator for segment '" + segment.getId() + "'.");
+        }
+    }
+
+    private byte[] rewriteXhtml(
+            byte[] content,
+            String docPath,
+            List<LocatedSegment> locatedSegments,
+            boolean bilingual
+    ) {
+        Document doc = xml(content, docPath);
+        List<Element> elements = elements(doc);
+        for (List<LocatedSegment> locatedGroup : groupByElementIndex(locatedSegments)) {
+            LocatedSegment first = locatedGroup.getFirst();
+            if (first.locator().index() >= elements.size()) {
+                throw exportFailed("Locator index '" + first.locator().index() + "' is out of range for '" + docPath + "'.");
+            }
+            Element sourceElement = elements.get(first.locator().index());
+            String locatedText = normalizeSegmentText(sourceElement.getTextContent());
+            List<LocatedSegment> orderedParts = orderedParts(locatedGroup);
+            String sourceText = normalizeSegmentText(joinSourceText(orderedParts));
+            if (!locatedText.equals(sourceText)) {
+                throw exportFailed("Locator mismatch for segment '" + first.segment().getId() + "' in '" + docPath + "'.");
+            }
+            String translatedText = joinTranslatedText(orderedParts);
+            if (bilingual) {
+                Element translatedElement = (Element) sourceElement.cloneNode(true);
+                translatedElement.setTextContent(translatedText);
+                insertAfter(sourceElement, translatedElement);
+            } else {
+                sourceElement.setTextContent(translatedText);
+            }
+        }
+        return serialize(doc);
+    }
+
+    private static List<List<LocatedSegment>> groupByElementIndex(List<LocatedSegment> locatedSegments) {
+        List<List<LocatedSegment>> groups = new ArrayList<>();
+        Integer currentIndex = null;
+        List<LocatedSegment> current = new ArrayList<>();
+        for (LocatedSegment located : locatedSegments) {
+            if (currentIndex == null || currentIndex.equals(located.locator().index())) {
+                current.add(located);
+                currentIndex = located.locator().index();
+                continue;
+            }
+            groups.add(List.copyOf(current));
+            current.clear();
+            current.add(located);
+            currentIndex = located.locator().index();
+        }
+        if (!current.isEmpty()) {
+            groups.add(List.copyOf(current));
+        }
+        return groups;
+    }
+
+    private static List<LocatedSegment> orderedParts(List<LocatedSegment> locatedGroup) {
+        if (locatedGroup.size() == 1
+                && locatedGroup.getFirst().locator().partIndex() == null
+                && locatedGroup.getFirst().locator().partCount() == null) {
+            return locatedGroup;
+        }
+        Integer partCount = locatedGroup.getFirst().locator().partCount();
+        if (partCount == null || partCount != locatedGroup.size()) {
+            throw exportFailed("Invalid locator part count for segment '" + locatedGroup.getFirst().segment().getId() + "'.");
+        }
+        List<LocatedSegment> ordered = locatedGroup.stream()
+                .sorted(Comparator.comparingInt(located -> located.locator().partIndex() == null ? -1 : located.locator().partIndex()))
+                .toList();
+        for (int i = 0; i < ordered.size(); i++) {
+            SegmentLocator locator = ordered.get(i).locator();
+            if (locator.partIndex() == null || locator.partCount() == null
+                    || !locator.partCount().equals(partCount) || locator.partIndex() != i) {
+                throw exportFailed("Invalid locator part order for segment '" + ordered.get(i).segment().getId() + "'.");
+            }
+        }
+        return ordered;
+    }
+
+    private static String joinSourceText(List<LocatedSegment> locatedSegments) {
+        return locatedSegments.stream()
+                .map(located -> located.segment().getSourceText())
+                .collect(Collectors.joining(" "));
+    }
+
+    private static String joinTranslatedText(List<LocatedSegment> locatedSegments) {
+        return locatedSegments.stream()
+                .map(located -> located.segment().getTranslatedText())
+                .collect(Collectors.joining(" "));
+    }
+
+    private static Document xml(byte[] content, String path) {
+        try {
+            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+            factory.setNamespaceAware(true);
+            factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
+            factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+            return factory.newDocumentBuilder().parse(new ByteArrayInputStream(content));
+        } catch (FanbookException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw exportFailed("EPUB document '" + path + "' is not well-formed XML.");
+        }
+    }
+
+    private static List<Element> elements(Document doc) {
+        NodeList nodes = doc.getElementsByTagNameNS("*", "*");
+        List<Element> elements = new ArrayList<>(nodes.getLength());
+        for (int i = 0; i < nodes.getLength(); i++) {
+            elements.add((Element) nodes.item(i));
+        }
+        return elements;
+    }
+
+    private static void insertAfter(Node reference, Node inserted) {
+        Node parent = reference.getParentNode();
+        Node next = reference.getNextSibling();
+        if (next == null) {
+            parent.appendChild(inserted);
+        } else {
+            parent.insertBefore(inserted, next);
+        }
+    }
+
+    private static byte[] serialize(Document doc) {
+        try {
+            TransformerFactory factory = TransformerFactory.newInstance();
+            factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
+            var transformer = factory.newTransformer();
+            transformer.setOutputProperty(OutputKeys.ENCODING, StandardCharsets.UTF_8.name());
+            transformer.setOutputProperty(OutputKeys.METHOD, "xml");
+            transformer.setOutputProperty(OutputKeys.OMIT_XML_DECLARATION, "no");
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            transformer.transform(new DOMSource(doc), new StreamResult(out));
+            return out.toByteArray();
+        } catch (Exception exception) {
+            throw exportFailed("Failed to serialize rewritten EPUB XHTML.");
+        }
+    }
+
+    private static String normalizeSegmentText(String text) {
+        return text == null ? "" : text.trim().replaceAll("\\s+", " ");
+    }
+
+    private static FanbookException exportFailed(String message) {
+        return new FanbookException(ErrorCode.EXPORT_FAILED, HttpStatus.INTERNAL_SERVER_ERROR, message);
     }
 
     private static String sha256(byte[] content) {
@@ -144,5 +332,11 @@ public class ExportService {
         } catch (Exception exception) {
             throw new IllegalStateException(exception);
         }
+    }
+
+    private record SegmentLocator(String docPath, Integer index, Integer partIndex, Integer partCount) {
+    }
+
+    private record LocatedSegment(SegmentEntity segment, SegmentLocator locator) {
     }
 }

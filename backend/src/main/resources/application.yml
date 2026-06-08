@@ -79,6 +79,9 @@ fanbook:
       stale-job-threshold: 30m
     chunk-target-characters: 6000
     max-segments-per-chunk: 40
+    context-window-segments: 4
+    glossary-candidate-limit: 12
+    glossary: []
     max-attempts-per-chunk: 3
   ai:
     provider: ${FANBOOK_AI_PROVIDER:mock}

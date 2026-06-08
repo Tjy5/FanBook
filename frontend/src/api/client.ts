@@ -11,6 +11,7 @@ import type {
   Role,
   SegmentNote,
   TranslationJob,
+  TranslationReviewResult,
 } from "../types";
 
 type RequestOptions = Omit<RequestInit, "body" | "headers"> & {
@@ -26,6 +27,15 @@ export interface LoginPayload {
 export interface TranslationPayload {
   providerName?: string;
   modelName?: string | null;
+}
+
+export interface TranslationReviewPayload {
+  providerName?: string;
+  modelName?: string | null;
+  maxSegments?: number;
+  minScore?: number;
+  warningCodes?: string[];
+  applyChanges?: boolean;
 }
 
 export class ApiClient {
@@ -113,6 +123,10 @@ export class ApiClient {
 
   cancelTranslation(jobId: number): Promise<TranslationJob> {
     return this.request(`/translation-jobs/${jobId}/cancel`, { method: "POST" });
+  }
+
+  reviewTranslation(bookId: number, payload: TranslationReviewPayload): Promise<TranslationReviewResult> {
+    return this.request(`/books/${bookId}/translation-review`, { method: "POST", body: payload });
   }
 
   generateArtifact(bookId: number, kind: "zh" | "bilingual" | "consistency_report"): Promise<ExportArtifact> {
@@ -236,6 +250,7 @@ export function createEndpoint(apiBase = "/api") {
     startTranslation: (bookId: number | string) => `${apiBase}/books/${bookId}/translation-jobs`,
     resumeTranslation: (bookId: number | string) => `${apiBase}/books/${bookId}/translation-jobs/resume`,
     cancelTranslation: (jobId: number | string) => `${apiBase}/translation-jobs/${jobId}/cancel`,
+    reviewTranslation: (bookId: number | string) => `${apiBase}/books/${bookId}/translation-review`,
     exportZh: (bookId: number | string) => `${apiBase}/books/${bookId}/exports/zh`,
     exportBilingual: (bookId: number | string) => `${apiBase}/books/${bookId}/exports/bilingual`,
     consistencyReport: (bookId: number | string) => `${apiBase}/books/${bookId}/reports/consistency`,

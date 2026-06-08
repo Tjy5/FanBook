@@ -94,6 +94,42 @@ export interface TranslationJob {
   updated_at?: string | null;
 }
 
+export interface TranslationReviewSegment {
+  segmentId?: number;
+  segment_id?: number;
+  segmentOrder?: number;
+  segment_order?: number;
+  score: number;
+  warnings: string[];
+  reviewed: boolean;
+  updated: boolean;
+}
+
+export interface TranslationReviewResult {
+  bookId?: number;
+  book_id?: number;
+  providerName?: string;
+  provider_name?: string;
+  modelName?: string;
+  model_name?: string;
+  applied: boolean;
+  minScore?: number;
+  min_score?: number;
+  maxSegments?: number;
+  max_segments?: number;
+  warningCodes?: string[];
+  warning_codes?: string[];
+  candidateSegments?: number;
+  candidate_segments?: number;
+  selectedSegments?: number;
+  selected_segments?: number;
+  reviewedSegments?: number;
+  reviewed_segments?: number;
+  updatedSegments?: number;
+  updated_segments?: number;
+  segments: TranslationReviewSegment[];
+}
+
 export interface ChapterSummary {
   id?: number;
   chapterId?: number;

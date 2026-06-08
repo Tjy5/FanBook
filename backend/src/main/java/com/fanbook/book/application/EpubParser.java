@@ -5,10 +5,12 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.text.BreakIterator;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
@@ -18,6 +20,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.stereotype.Component;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
+import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 
 @Component
@@ -25,6 +28,8 @@ import org.w3c.dom.NodeList;
 public class EpubParser {
 
     private static final int BUFFER_SIZE = 8192;
+    private static final int LONG_PARAGRAPH_TARGET_CHARACTERS = 1_800;
+    private static final String URL_PATTERN = "(?i)^(https?://|www\\.).+";
 
     private final EpubParserProperties properties;
 
@@ -86,24 +91,163 @@ public class EpubParser {
         for (int i = 0; i < nodes.getLength(); i++) {
             Element element = (Element) nodes.item(i);
             String name = element.getLocalName();
-            if (!List.of("h1", "h2", "h3", "p", "li", "figcaption").contains(name)) {
+            if (!List.of("h1", "h2", "h3", "h4", "h5", "h6", "p", "li", "pre", "figcaption").contains(name)) {
                 continue;
             }
             String text = element.getTextContent().trim().replaceAll("\\s+", " ");
-            if (text.isBlank()) {
+            if (isNonTranslatable(text)) {
                 continue;
             }
-            SegmentType type = switch (name) {
-                case "h1", "h2", "h3" -> SegmentType.TITLE;
-                case "li" -> SegmentType.LIST_ITEM;
-                case "figcaption" -> SegmentType.IMAGE_CAPTION;
-                case "p" -> SegmentType.PARAGRAPH;
-                default -> SegmentType.OTHER;
-            };
-            int order = result.size() + 1;
-            result.add(new ParsedSegment(order, text, type, "{\"docPath\":\"" + docPath + "\",\"index\":" + i + "}", sha256(text)));
+            SegmentType type = segmentType(element, name);
+            String locator = locatorJson(docPath, i);
+            List<String> parts = splitText(text, type);
+            for (int partIndex = 0; partIndex < parts.size(); partIndex++) {
+                String part = parts.get(partIndex);
+                int order = result.size() + 1;
+                String partLocator = parts.size() == 1 ? locator : locatorJson(docPath, i, partIndex, parts.size());
+                result.add(new ParsedSegment(order, part, type, partLocator, sha256(part)));
+            }
         }
         return result;
+    }
+
+    private static SegmentType segmentType(Element element, String name) {
+        if (List.of("h1", "h2", "h3", "h4", "h5", "h6").contains(name)) {
+            return SegmentType.TITLE;
+        }
+        if ("li".equals(name)) {
+            return SegmentType.LIST_ITEM;
+        }
+        if ("pre".equals(name) || hasClassToken(element, "poem") || hasClassToken(element, "poetry")
+                || hasClassToken(element, "verse") || hasClassToken(element, "stanza")) {
+            return SegmentType.POETRY;
+        }
+        if (inside(element, "blockquote") || hasClassToken(element, "quote") || hasClassToken(element, "blockquote")) {
+            return SegmentType.QUOTE;
+        }
+        if ("figcaption".equals(name)) {
+            return SegmentType.IMAGE_CAPTION;
+        }
+        if ("p".equals(name)) {
+            return SegmentType.PARAGRAPH;
+        }
+        return SegmentType.OTHER;
+    }
+
+    private static boolean inside(Element element, String ancestorName) {
+        Node node = element.getParentNode();
+        while (node instanceof Element parent) {
+            if (ancestorName.equals(parent.getLocalName())) {
+                return true;
+            }
+            node = parent.getParentNode();
+        }
+        return false;
+    }
+
+    private static boolean hasClassToken(Element element, String token) {
+        String className = element.getAttribute("class");
+        if (className == null || className.isBlank()) {
+            return false;
+        }
+        for (String candidate : className.toLowerCase(Locale.ROOT).split("\\s+")) {
+            if (candidate.equals(token) || candidate.contains("-" + token) || candidate.contains(token + "-")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static List<String> splitText(String text, SegmentType type) {
+        if (type != SegmentType.PARAGRAPH || text.length() <= LONG_PARAGRAPH_TARGET_CHARACTERS) {
+            return List.of(text);
+        }
+        List<String> parts = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        for (String sentence : sentences(text)) {
+            if (sentence.length() > LONG_PARAGRAPH_TARGET_CHARACTERS) {
+                appendPart(parts, current);
+                parts.addAll(splitByWords(sentence));
+                continue;
+            }
+            int separator = current.isEmpty() ? 0 : 1;
+            if (!current.isEmpty() && current.length() + separator + sentence.length() > LONG_PARAGRAPH_TARGET_CHARACTERS) {
+                appendPart(parts, current);
+            }
+            if (!current.isEmpty()) {
+                current.append(' ');
+            }
+            current.append(sentence);
+        }
+        appendPart(parts, current);
+        if (parts.isEmpty() || !String.join(" ", parts).equals(text)) {
+            return List.of(text);
+        }
+        return List.copyOf(parts);
+    }
+
+    private static List<String> sentences(String text) {
+        BreakIterator iterator = BreakIterator.getSentenceInstance(Locale.ROOT);
+        iterator.setText(text);
+        List<String> result = new ArrayList<>();
+        int start = iterator.first();
+        for (int end = iterator.next(); end != BreakIterator.DONE; start = end, end = iterator.next()) {
+            String sentence = text.substring(start, end).trim().replaceAll("\\s+", " ");
+            if (!sentence.isBlank()) {
+                result.add(sentence);
+            }
+        }
+        return result.isEmpty() ? List.of(text) : result;
+    }
+
+    private static List<String> splitByWords(String text) {
+        List<String> parts = new ArrayList<>();
+        String remaining = text.trim();
+        while (remaining.length() > LONG_PARAGRAPH_TARGET_CHARACTERS) {
+            int splitAt = remaining.lastIndexOf(' ', LONG_PARAGRAPH_TARGET_CHARACTERS);
+            if (splitAt < LONG_PARAGRAPH_TARGET_CHARACTERS / 2) {
+                return List.of(text);
+            }
+            parts.add(remaining.substring(0, splitAt).trim());
+            remaining = remaining.substring(splitAt).trim();
+        }
+        if (!remaining.isBlank()) {
+            parts.add(remaining);
+        }
+        return parts;
+    }
+
+    private static void appendPart(List<String> parts, StringBuilder current) {
+        if (!current.isEmpty()) {
+            parts.add(current.toString());
+            current.setLength(0);
+        }
+    }
+
+    private static String locatorJson(String docPath, int index) {
+        return "{\"docPath\":\"" + docPath + "\",\"index\":" + index + "}";
+    }
+
+    private static String locatorJson(String docPath, int index, int partIndex, int partCount) {
+        return "{\"docPath\":\"" + docPath + "\",\"index\":" + index
+                + ",\"partIndex\":" + partIndex + ",\"partCount\":" + partCount + "}";
+    }
+
+    private static boolean isNonTranslatable(String text) {
+        if (text.isBlank()) {
+            return true;
+        }
+        String compact = text.replaceAll("\\s+", "");
+        if (compact.matches(URL_PATTERN)) {
+            return true;
+        }
+        if (compact.matches("[\\p{P}\\p{S}]+")) {
+            return true;
+        }
+        if (compact.matches("[\\p{N}]+")) {
+            return true;
+        }
+        return compact.length() <= 3 && compact.matches("[\\p{N}\\p{P}\\p{S}]+");
     }
 
     private static Document xml(byte[] content, String path) {

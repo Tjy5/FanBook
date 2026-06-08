@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fanbook.ai.domain.AiTranslationProvider;
+import com.fanbook.ai.domain.StructuredTranslationReviewRequest;
 import com.fanbook.ai.domain.StructuredTranslationRequest;
 import com.fanbook.ai.domain.StructuredTranslationResult;
 import com.fanbook.common.error.ErrorCode;
@@ -23,9 +24,26 @@ import org.springframework.web.client.RestClient;
 public class OpenAiCompatibleProvider implements AiTranslationProvider {
 
     private static final String STRUCTURED_OUTPUT_INSTRUCTIONS = """
-            Translate the source segments into the target language.
+            Translate the source segments into natural, publication-quality target-language prose.
             Return JSON only with shape {"items":[{"segmentId":number,"translatedText":string}]}.
             Preserve every input segmentId exactly once.
+            Translate only the request items; use context only for terminology, style, names, pronouns, and continuity.
+            Use glossary entries as terminology/name constraints. If targetTerm is present, use it consistently.
+            Do not merge, split, omit, or reorder segments.
+            Keep each translatedText aligned to exactly one source segment.
+            Preserve numbers, names, inline markers, links, punctuation intent, and formatting hints.
+            Maintain consistent terminology, character names, tone, and narrative voice within the chapter.
+            """;
+    private static final String REVIEW_INSTRUCTIONS = """
+            Review existing target-language book translations and fix only concrete quality issues.
+            Return JSON only with shape {"items":[{"segmentId":number,"translatedText":string}]}.
+            Preserve every input segmentId exactly once.
+            Do not retranslate from scratch when the current translation is acceptable.
+            Use the current translation as the base text; make the smallest correction that resolves the listed warnings.
+            Preserve meaning, names, numbers, terminology, tone, punctuation intent, and inline markers.
+            Use glossary entries as terminology/name constraints. If targetTerm is present, use it consistently.
+            Do not merge, split, omit, or reorder segments.
+            If a segment has no obvious problem beyond the warning signal, return its current translation unchanged.
             """;
 
     private final RestClient restClient;
@@ -56,13 +74,22 @@ public class OpenAiCompatibleProvider implements AiTranslationProvider {
 
     @Override
     public StructuredTranslationResult translateChunk(StructuredTranslationRequest request, String modelName) {
+        return sendStructuredRequest(STRUCTURED_OUTPUT_INSTRUCTIONS, request, modelName);
+    }
+
+    @Override
+    public StructuredTranslationResult reviewTranslations(StructuredTranslationReviewRequest request, String modelName) {
+        return sendStructuredRequest(REVIEW_INSTRUCTIONS, request, modelName);
+    }
+
+    private StructuredTranslationResult sendStructuredRequest(String instructions, Object request, String modelName) {
         requireApiKey();
         acquirePermit();
         try {
             String resolvedModelName = modelName == null || modelName.isBlank() ? properties.model() : modelName;
             Map<String, Object> payload = Map.of(
                     "model", resolvedModelName,
-                    "instructions", STRUCTURED_OUTPUT_INSTRUCTIONS,
+                    "instructions", instructions,
                     "input", objectMapper.writeValueAsString(request)
             );
             String body = restClient.post()

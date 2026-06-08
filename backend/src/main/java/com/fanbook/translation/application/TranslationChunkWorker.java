@@ -5,18 +5,23 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fanbook.ai.application.ProviderFactory;
 import com.fanbook.ai.application.StructuredTranslationValidator;
+import com.fanbook.ai.domain.StructuredTranslationContextItem;
+import com.fanbook.ai.domain.StructuredTranslationGlossaryItem;
 import com.fanbook.ai.domain.StructuredTranslationItem;
 import com.fanbook.ai.domain.StructuredTranslationRequest;
 import com.fanbook.ai.domain.StructuredTranslationSourceItem;
 import com.fanbook.book.domain.SegmentEntity;
+import com.fanbook.book.domain.SegmentStatus;
 import com.fanbook.book.infrastructure.SegmentRepository;
 import com.fanbook.common.error.ErrorCode;
 import com.fanbook.common.error.FanbookException;
+import com.fanbook.translation.config.TranslationChunkPlanningProperties;
 import com.fanbook.translation.domain.TranslationChunkEntity;
 import com.fanbook.translation.infrastructure.TranslationChunkRepository;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.springframework.http.HttpStatus;
@@ -31,6 +36,8 @@ public class TranslationChunkWorker {
     private final ProviderFactory providerFactory;
     private final StructuredTranslationValidator validator;
     private final TranslationCacheService cacheService;
+    private final TranslationChunkPlanningProperties chunkPlanningProperties;
+    private final TranslationGlossaryBuilder glossaryBuilder = new TranslationGlossaryBuilder();
     private final ObjectMapper objectMapper = JsonMapper.builder().build();
 
     public TranslationChunkWorker(
@@ -38,13 +45,15 @@ public class TranslationChunkWorker {
             SegmentRepository segmentRepository,
             ProviderFactory providerFactory,
             StructuredTranslationValidator validator,
-            TranslationCacheService cacheService
+            TranslationCacheService cacheService,
+            TranslationChunkPlanningProperties chunkPlanningProperties
     ) {
         this.chunkRepository = chunkRepository;
         this.segmentRepository = segmentRepository;
         this.providerFactory = providerFactory;
         this.validator = validator;
         this.cacheService = cacheService;
+        this.chunkPlanningProperties = chunkPlanningProperties;
     }
 
     @Transactional
@@ -61,7 +70,7 @@ public class TranslationChunkWorker {
 
         if (!missSegments.isEmpty()) {
             List<Long> missIds = missSegments.stream().map(SegmentEntity::getId).toList();
-            StructuredTranslationRequest request = buildRequest(chunk, missIds, missSegments);
+            StructuredTranslationRequest request = buildRequest(chunk, segmentIds, missIds, missSegments);
             var provider = providerFactory.getProvider(chunk.getJob().getProviderName());
             var result = provider.translateChunk(request, chunk.getJob().getModelName());
             validator.validate(missIds, result);
@@ -79,6 +88,7 @@ public class TranslationChunkWorker {
 
     private StructuredTranslationRequest buildRequest(
             TranslationChunkEntity chunk,
+            List<Long> chunkSegmentIds,
             List<Long> segmentIds,
             List<SegmentEntity> segments
     ) {
@@ -98,13 +108,57 @@ public class TranslationChunkWorker {
                 })
                 .toList();
         SegmentEntity first = segmentById.get(segmentIds.getFirst());
+        List<StructuredTranslationContextItem> context = contextItems(first, chunkSegmentIds);
+        List<StructuredTranslationGlossaryItem> glossary = glossaryItems(first, context, items);
         return new StructuredTranslationRequest(
                 first.getBook().getSourceLanguage(),
                 "zh",
                 first.getBook().getTitle(),
                 first.getChapter().getTitle(),
+                context,
+                glossary,
                 items
         );
+    }
+
+    private List<StructuredTranslationGlossaryItem> glossaryItems(
+            SegmentEntity first,
+            List<StructuredTranslationContextItem> context,
+            List<StructuredTranslationSourceItem> items
+    ) {
+        List<String> texts = new ArrayList<>();
+        texts.add(first.getBook().getTitle());
+        texts.add(first.getChapter().getTitle());
+        context.forEach(item -> texts.add(item.sourceText()));
+        items.forEach(item -> texts.add(item.sourceText()));
+        return glossaryBuilder.build(
+                chunkPlanningProperties.glossary(),
+                texts,
+                chunkPlanningProperties.glossaryCandidateLimit()
+        );
+    }
+
+    private List<StructuredTranslationContextItem> contextItems(SegmentEntity first, List<Long> currentChunkSegmentIds) {
+        int limit = chunkPlanningProperties.contextWindowSegments();
+        if (limit <= 0 || first.getChapter().getId() == null) {
+            return List.of();
+        }
+        Set<Long> currentIds = Set.copyOf(currentChunkSegmentIds);
+        List<StructuredTranslationContextItem> prior = segmentRepository.findByChapterIdOrderBySegmentOrderAsc(first.getChapter().getId()).stream()
+                .filter(segment -> segment.getSegmentOrder() < first.getSegmentOrder())
+                .filter(segment -> !currentIds.contains(segment.getId()))
+                .filter(segment -> segment.getStatus() == SegmentStatus.TRANSLATED)
+                .filter(segment -> segment.getTranslatedText() != null && !segment.getTranslatedText().isBlank())
+                .map(segment -> new StructuredTranslationContextItem(
+                        segment.getId(),
+                        segment.getSourceText(),
+                        segment.getTranslatedText()
+                ))
+                .toList();
+        if (prior.size() <= limit) {
+            return prior;
+        }
+        return List.copyOf(prior.subList(prior.size() - limit, prior.size()));
     }
 
     private List<SegmentEntity> orderedSegments(List<Long> segmentIds) {

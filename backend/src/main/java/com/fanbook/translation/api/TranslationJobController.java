@@ -3,6 +3,7 @@ package com.fanbook.translation.api;
 import com.fanbook.auth.application.CurrentUserProvider;
 import com.fanbook.translation.application.TranslationJobService;
 import com.fanbook.translation.application.TranslationResumeService;
+import com.fanbook.translation.application.TranslationReviewService;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -16,15 +17,18 @@ public class TranslationJobController {
 
     private final TranslationJobService translationJobService;
     private final TranslationResumeService translationResumeService;
+    private final TranslationReviewService translationReviewService;
     private final CurrentUserProvider currentUserProvider;
 
     public TranslationJobController(
             TranslationJobService translationJobService,
             TranslationResumeService translationResumeService,
+            TranslationReviewService translationReviewService,
             CurrentUserProvider currentUserProvider
     ) {
         this.translationJobService = translationJobService;
         this.translationResumeService = translationResumeService;
+        this.translationReviewService = translationReviewService;
         this.currentUserProvider = currentUserProvider;
     }
 
@@ -50,5 +54,13 @@ public class TranslationJobController {
     @PostMapping("/api/translation-jobs/{jobId}/cancel")
     public TranslationJobResponse cancel(@PathVariable Long jobId) {
         return translationJobService.cancelForCurrentUser(jobId);
+    }
+
+    @PostMapping("/api/books/{bookId}/translation-review")
+    public TranslationReviewResponse review(
+            @PathVariable Long bookId,
+            @RequestBody(required = false) TranslationReviewRequest request
+    ) {
+        return translationReviewService.reviewForCurrentUser(bookId, request);
     }
 }

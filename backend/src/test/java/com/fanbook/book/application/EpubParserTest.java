@@ -7,6 +7,7 @@ import com.fanbook.book.domain.SegmentType;
 import com.fanbook.testsupport.MinimalEpubFactory;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 import org.junit.jupiter.api.Test;
@@ -27,6 +28,57 @@ class EpubParserTest {
                 .extracting(ParsedSegment::sourceText)
                 .containsExactly("Chapter One", "Hello world.", "Alice went to Wonderland.");
         assertThat(book.chapters().getFirst().segments().getFirst().segmentType()).isEqualTo(SegmentType.TITLE);
+    }
+
+    @Test
+    void skipsClearlyNonTranslatableFragments() {
+        ParsedBook book = parser.parse(MinimalEpubFactory.create("""
+                <h1>Chapter One</h1>
+                <p>12345</p>
+                <p>www.example.com</p>
+                <p>...</p>
+                <p>…</p>
+                <p>—</p>
+                <p>1.</p>
+                <p>Alice stayed.</p>
+                """));
+
+        assertThat(book.chapters().getFirst().segments())
+                .extracting(ParsedSegment::sourceText)
+                .containsExactly("Chapter One", "Alice stayed.");
+    }
+
+    @Test
+    void classifiesQuoteAndPoetrySegments() {
+        ParsedBook book = parser.parse(MinimalEpubFactory.create("""
+                <h1>Chapter One</h1>
+                <blockquote><p>The quoted warning.</p></blockquote>
+                <p class="poetry">The moon was a silver coin.</p>
+                <pre>The old song returns.</pre>
+                """));
+
+        assertThat(book.chapters().getFirst().segments())
+                .extracting(ParsedSegment::segmentType)
+                .containsExactly(SegmentType.TITLE, SegmentType.QUOTE, SegmentType.POETRY, SegmentType.POETRY);
+    }
+
+    @Test
+    void splitsLongParagraphOnSentenceBoundariesWithSharedLocatorParts() {
+        String longParagraph = longParagraph();
+
+        ParsedBook book = parser.parse(MinimalEpubFactory.create("""
+                <h1>Chapter One</h1>
+                <p>%s</p>
+                """.formatted(longParagraph)));
+
+        List<ParsedSegment> paragraphParts = book.chapters().getFirst().segments().stream()
+                .filter(segment -> segment.segmentType() == SegmentType.PARAGRAPH)
+                .toList();
+        assertThat(paragraphParts).hasSizeGreaterThan(1);
+        assertThat(String.join(" ", paragraphParts.stream().map(ParsedSegment::sourceText).toList()))
+                .isEqualTo(longParagraph);
+        assertThat(paragraphParts.getFirst().locatorJson()).contains("\"partIndex\":0");
+        assertThat(paragraphParts.getFirst().locatorJson()).contains("\"partCount\":" + paragraphParts.size());
     }
 
     @Test
@@ -73,5 +125,9 @@ class EpubParserTest {
         } catch (Exception exception) {
             throw new IllegalStateException(exception);
         }
+    }
+
+    private static String longParagraph() {
+        return "This sentence gives the parser a natural boundary for semantic splitting. ".repeat(80).trim();
     }
 }
