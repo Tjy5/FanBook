@@ -94,6 +94,44 @@ export interface TranslationJob {
   updated_at?: string | null;
 }
 
+export interface TranslationPromptProfile {
+  name?: string;
+  version?: string;
+  styleInstruction?: string;
+  translationInstruction?: string;
+  reviewInstruction?: string;
+  analysisInstruction?: string;
+  preserveFormatting?: boolean;
+}
+
+export interface GlossaryCandidate {
+  candidateId?: number | null;
+  sourceTerm: string;
+  targetTerm?: string | null;
+  category?: string | null;
+  note?: string | null;
+  status: string;
+  evidenceCount: number;
+  firstSegmentId?: number | null;
+}
+
+export interface GlossaryAnalysisResult {
+  bookId: number;
+  providerName: string;
+  modelName: string | null;
+  analyzedSegments: number;
+  candidateCount: number;
+  persistedCandidates: number;
+  candidates: GlossaryCandidate[];
+}
+
+export interface GlossaryImportResult {
+  bookId: number;
+  acceptedCandidates: number;
+  conflicts: number;
+  candidates: GlossaryCandidate[];
+}
+
 export interface TranslationReviewSegment {
   segmentId?: number;
   segment_id?: number;

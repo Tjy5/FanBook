@@ -72,6 +72,8 @@ for (const fragment of [
   "listBooks",
   "readerSegments",
   "notesExport",
+  "glossaryAnalysis",
+  "acceptGlossaryCandidates",
   "extractFilename",
   "normalizeError",
 ]) {
@@ -84,6 +86,9 @@ for (const fragment of [
   "export interface BookDetail",
   "export interface ReaderSegment",
   "export interface SegmentNote",
+  "export interface TranslationPromptProfile",
+  "export interface GlossaryAnalysisResult",
+  "export interface GlossaryImportResult",
 ]) {
   assert.ok(types.includes(fragment), `Expected type contract fragment ${fragment}`);
 }

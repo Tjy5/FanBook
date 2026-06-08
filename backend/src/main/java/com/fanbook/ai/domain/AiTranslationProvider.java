@@ -7,6 +7,10 @@ public interface AiTranslationProvider {
 
     StructuredTranslationResult translateChunk(StructuredTranslationRequest request, String modelName);
 
+    default StructuredGlossaryAnalysisResult analyzeGlossary(StructuredGlossaryAnalysisRequest request, String modelName) {
+        return new StructuredGlossaryAnalysisResult(List.of(), name(), modelName == null ? "" : modelName);
+    }
+
     default StructuredTranslationResult reviewTranslations(StructuredTranslationReviewRequest request, String modelName) {
         return translateChunk(toTranslationRequest(request), modelName);
     }
@@ -19,12 +23,18 @@ public interface AiTranslationProvider {
         return reviewTranslations(request, "");
     }
 
+    default StructuredGlossaryAnalysisResult analyzeGlossary(StructuredGlossaryAnalysisRequest request) {
+        return analyzeGlossary(request, "");
+    }
+
     private static StructuredTranslationRequest toTranslationRequest(StructuredTranslationReviewRequest request) {
         return new StructuredTranslationRequest(
                 request.sourceLanguage(),
                 request.targetLanguage(),
                 request.bookTitle(),
                 request.chapterTitle(),
+                request.promptProfile(),
+                request.preservation(),
                 List.of(),
                 request.glossary(),
                 request.items().stream()

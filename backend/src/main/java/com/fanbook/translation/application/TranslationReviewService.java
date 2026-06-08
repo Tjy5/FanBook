@@ -40,7 +40,8 @@ public class TranslationReviewService {
             "source_repeated_in_translation",
             "english_residue",
             "suspicious_length_ratio",
-            "glossary_term_missing"
+            "glossary_term_missing",
+            "preserved_token_missing"
     );
 
     private final BookAccessService bookAccessService;
@@ -50,6 +51,7 @@ public class TranslationReviewService {
     private final StructuredTranslationValidator validator;
     private final TranslationChunkPlanningProperties chunkPlanningProperties;
     private final ActiveTranslationSessionRepository activeSessionRepository;
+    private final TranslationRuleSnapshotService ruleSnapshotService;
     private final TranslationQualityAnalyzer qualityAnalyzer = new TranslationQualityAnalyzer();
     private final TranslationGlossaryBuilder glossaryBuilder = new TranslationGlossaryBuilder();
 
@@ -60,7 +62,8 @@ public class TranslationReviewService {
             ProviderFactory providerFactory,
             StructuredTranslationValidator validator,
             TranslationChunkPlanningProperties chunkPlanningProperties,
-            ActiveTranslationSessionRepository activeSessionRepository
+            ActiveTranslationSessionRepository activeSessionRepository,
+            TranslationRuleSnapshotService ruleSnapshotService
     ) {
         this.bookAccessService = bookAccessService;
         this.bookRepository = bookRepository;
@@ -69,6 +72,7 @@ public class TranslationReviewService {
         this.validator = validator;
         this.chunkPlanningProperties = chunkPlanningProperties;
         this.activeSessionRepository = activeSessionRepository;
+        this.ruleSnapshotService = ruleSnapshotService;
     }
 
     @Transactional
@@ -130,11 +134,14 @@ public class TranslationReviewService {
                 ))
                 .toList();
         List<StructuredTranslationGlossaryItem> glossary = glossary(managedBook, items);
+        TranslationRuleSnapshotData snapshot = ruleSnapshotService.dataForBook(managedBook);
         StructuredTranslationReviewRequest providerRequest = new StructuredTranslationReviewRequest(
                 managedBook.getSourceLanguage(),
-                "zh",
+                snapshot.targetLanguage(),
                 managedBook.getTitle(),
                 "Selected risk segments",
+                snapshot.promptProfile(),
+                snapshot.preservation(),
                 glossary,
                 items
         );
@@ -163,7 +170,7 @@ public class TranslationReviewService {
             texts.add(item.translatedText());
         });
         return glossaryBuilder.build(
-                chunkPlanningProperties.glossary(),
+                ruleSnapshotService.dataForBook(book).glossary(),
                 texts,
                 chunkPlanningProperties.glossaryCandidateLimit()
         );

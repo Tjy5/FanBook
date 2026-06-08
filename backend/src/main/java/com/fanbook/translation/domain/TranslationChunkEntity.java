@@ -48,6 +48,13 @@ public class TranslationChunkEntity {
     @Column(name = "estimated_tokens", nullable = false)
     private int estimatedTokens;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "parent_chunk_id")
+    private TranslationChunkEntity parentChunk;
+
+    @Column(name = "degradation_depth", nullable = false)
+    private int degradationDepth;
+
     @Column(name = "attempt_count", nullable = false)
     private int attemptCount;
 
@@ -128,6 +135,14 @@ public class TranslationChunkEntity {
         return estimatedTokens;
     }
 
+    public TranslationChunkEntity getParentChunk() {
+        return parentChunk;
+    }
+
+    public int getDegradationDepth() {
+        return degradationDepth;
+    }
+
     public int getAttemptCount() {
         return attemptCount;
     }
@@ -193,6 +208,19 @@ public class TranslationChunkEntity {
         this.lastErrorMessage = lastErrorMessage;
         this.finishedAt = finishedAt;
         clearLease();
+    }
+
+    public void markSuperseded(String lastErrorCode, String lastErrorMessage, OffsetDateTime finishedAt) {
+        this.status = TranslationChunkStatus.SUPERSEDED;
+        this.lastErrorCode = lastErrorCode;
+        this.lastErrorMessage = lastErrorMessage;
+        this.finishedAt = finishedAt;
+        clearLease();
+    }
+
+    public void attachParent(TranslationChunkEntity parentChunk, int degradationDepth) {
+        this.parentChunk = parentChunk;
+        this.degradationDepth = degradationDepth;
     }
 
     public void forceLeaseExpired(OffsetDateTime lockedUntil) {

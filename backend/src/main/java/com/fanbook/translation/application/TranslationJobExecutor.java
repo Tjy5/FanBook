@@ -44,6 +44,8 @@ public class TranslationJobExecutor {
     private final TransactionTemplate transactionTemplate;
     private final int maxAttemptsPerChunk;
     private final TranslationChunkPlanningProperties chunkPlanningProperties;
+    private final TranslationRuleSnapshotService ruleSnapshotService;
+    private final TranslationTextProtector textProtector;
     private final TranslationGlossaryBuilder glossaryBuilder = new TranslationGlossaryBuilder();
     private final ObjectMapper objectMapper = JsonMapper.builder().build();
 
@@ -56,6 +58,8 @@ public class TranslationJobExecutor {
             BookTranslationLock lock,
             TransactionTemplate transactionTemplate,
             TranslationChunkPlanningProperties chunkPlanningProperties,
+            TranslationRuleSnapshotService ruleSnapshotService,
+            TranslationTextProtector textProtector,
             @Value("${fanbook.translation.max-attempts-per-chunk:3}") int maxAttemptsPerChunk
     ) {
         this.jobRepository = jobRepository;
@@ -66,6 +70,8 @@ public class TranslationJobExecutor {
         this.lock = lock;
         this.transactionTemplate = transactionTemplate;
         this.chunkPlanningProperties = chunkPlanningProperties;
+        this.ruleSnapshotService = ruleSnapshotService;
+        this.textProtector = textProtector;
         this.maxAttemptsPerChunk = maxAttemptsPerChunk;
     }
 
@@ -138,7 +144,7 @@ public class TranslationJobExecutor {
                 Map<Long, String> translatedById = result.items().stream()
                         .collect(Collectors.toMap(StructuredTranslationItem::segmentId, StructuredTranslationItem::translatedText));
                 for (SegmentEntity segment : segmentRepository.findAllById(work.segmentIds())) {
-                    segment.markTranslated(translatedById.get(segment.getId()));
+                    segment.markTranslated(textProtector.postProcess(translatedById.get(segment.getId())));
                 }
                 TranslationChunkEntity managedChunk = chunkRepository.findById(chunk.getId())
                         .orElseThrow(() -> notFound("Translation chunk '" + chunk.getId() + "' was not found."));
@@ -153,9 +159,12 @@ public class TranslationJobExecutor {
     private ChunkWork buildChunkWork(TranslationChunkEntity chunk) {
         List<Long> segmentIds = parseSegmentIds(chunk.getSegmentIdsJson());
         return transactionTemplate.execute(status -> {
+            TranslationChunkEntity managedChunk = chunkRepository.findById(chunk.getId())
+                    .orElseThrow(() -> notFound("Translation chunk '" + chunk.getId() + "' was not found."));
             List<SegmentEntity> segments = segmentRepository.findAllById(segmentIds);
             Map<Long, SegmentEntity> segmentById = segments.stream()
                     .collect(Collectors.toMap(SegmentEntity::getId, Function.identity()));
+            TranslationRuleSnapshotData snapshot = ruleSnapshotService.dataForJob(managedChunk.getJob());
             List<StructuredTranslationSourceItem> items = segmentIds.stream()
                     .map(id -> {
                         SegmentEntity segment = segmentById.get(id);
@@ -171,7 +180,7 @@ public class TranslationJobExecutor {
                     .toList();
             SegmentEntity first = segmentById.get(segmentIds.getFirst());
             List<StructuredTranslationGlossaryItem> glossary = glossaryBuilder.build(
-                    chunkPlanningProperties.glossary(),
+                    snapshot.glossary(),
                     requestTexts(first, items),
                     chunkPlanningProperties.glossaryCandidateLimit()
             );
@@ -179,9 +188,11 @@ public class TranslationJobExecutor {
                     segmentIds,
                     new StructuredTranslationRequest(
                             first.getBook().getSourceLanguage(),
-                            "zh",
+                            snapshot.targetLanguage(),
                             first.getBook().getTitle(),
                             first.getChapter().getTitle(),
+                            snapshot.promptProfile(),
+                            snapshot.preservation(),
                             List.of(),
                             glossary,
                             items

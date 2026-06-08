@@ -3,6 +3,7 @@ package com.fanbook.translation.infrastructure;
 import com.fanbook.common.error.FanbookException;
 import com.fanbook.translation.application.ChunkMessage;
 import com.fanbook.translation.application.TranslationChunkPublisher;
+import com.fanbook.translation.application.TranslationChunkDegradationService;
 import com.fanbook.translation.application.TranslationChunkStateService;
 import com.fanbook.translation.application.TranslationChunkWorker;
 import com.fanbook.translation.application.TranslationJobAggregator;
@@ -34,6 +35,7 @@ public class TranslationChunkConsumer {
     private final TranslationJobAggregator aggregator;
     private final TranslationChunkPublisher chunkPublisher;
     private final TranslationJobRepository jobRepository;
+    private final TranslationChunkDegradationService degradationService;
     private final TransactionTemplate transactionTemplate;
     private final TransactionTemplate afterCommitTransactionTemplate;
     private final int maxAttempts;
@@ -44,6 +46,7 @@ public class TranslationChunkConsumer {
             TranslationJobAggregator aggregator,
             TranslationChunkPublisher chunkPublisher,
             TranslationJobRepository jobRepository,
+            TranslationChunkDegradationService degradationService,
             PlatformTransactionManager transactionManager,
             @Value("${fanbook.translation.max-attempts-per-chunk:3}") int maxAttempts
     ) {
@@ -52,6 +55,7 @@ public class TranslationChunkConsumer {
         this.aggregator = aggregator;
         this.chunkPublisher = chunkPublisher;
         this.jobRepository = jobRepository;
+        this.degradationService = degradationService;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.afterCommitTransactionTemplate = new TransactionTemplate(transactionManager);
         this.afterCommitTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
@@ -114,7 +118,7 @@ public class TranslationChunkConsumer {
                         publishRetry(message, currentAttempt.get());
                         return;
                     }
-                    aggregateAfterRetryExhaustion(message);
+                    degradeOrAggregateAfterRetryExhaustion(message);
                 }
             });
             return null;
@@ -138,9 +142,16 @@ public class TranslationChunkConsumer {
         }
     }
 
-    private void aggregateAfterRetryExhaustion(ChunkMessage message) {
+    private void degradeOrAggregateAfterRetryExhaustion(ChunkMessage message) {
         try {
-            afterCommitTransactionTemplate.executeWithoutResult(status -> aggregator.aggregate(message.jobId()));
+            afterCommitTransactionTemplate.executeWithoutResult(status -> {
+                var retryMessages = degradationService.degrade(message.chunkId());
+                if (!retryMessages.isEmpty()) {
+                    chunkPublisher.publishAll(retryMessages);
+                    return;
+                }
+                aggregator.aggregate(message.jobId());
+            });
         } catch (RuntimeException aggregateException) {
             log.error("Failed to aggregate translation job {} after retry exhaustion", message.jobId(), aggregateException);
         }

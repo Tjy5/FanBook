@@ -115,6 +115,39 @@ const providers = {
   ],
 };
 
+const glossaryCandidates = [
+  {
+    candidateId: 1,
+    sourceTerm: "Mira",
+    targetTerm: "米拉",
+    category: "person",
+    note: "Recurring character name.",
+    status: "CANDIDATE",
+    evidenceCount: 4,
+    firstSegmentId: 1001,
+  },
+  {
+    candidateId: 2,
+    sourceTerm: "Memory Archive",
+    targetTerm: "记忆档案馆",
+    category: "place",
+    note: "Book title and location concept.",
+    status: "CANDIDATE",
+    evidenceCount: 3,
+    firstSegmentId: 1002,
+  },
+  {
+    candidateId: 3,
+    sourceTerm: "afternoon",
+    targetTerm: null,
+    category: "concept",
+    note: "Repeated motif; keep translation consistent by context.",
+    status: "CONFLICT",
+    evidenceCount: 2,
+    firstSegmentId: 1001,
+  },
+];
+
 const users = {
   users: mockAccounts.map((account) => ({
     id: account.id,
@@ -226,6 +259,60 @@ function routeAuthenticatedRequest(request, response, path, account) {
           updated: false,
         },
       ],
+    });
+    return;
+  }
+  if (path === "/books/42/translation-glossary-analysis" && request.method === "POST") {
+    sendJson(response, 200, {
+      bookId: 42,
+      providerName: "openai-compatible",
+      modelName: "gpt-5",
+      analyzedSegments: 120,
+      candidateCount: glossaryCandidates.length,
+      persistedCandidates: glossaryCandidates.length,
+      candidates: glossaryCandidates,
+    });
+    return;
+  }
+  if (path === "/books/42/translation-glossary-candidates/accept" && request.method === "POST") {
+    const accepted = glossaryCandidates.map((candidate) => candidate.status === "CANDIDATE"
+      ? { ...candidate, status: "ACCEPTED" }
+      : candidate);
+    sendJson(response, 200, {
+      bookId: 42,
+      acceptedCandidates: accepted.filter((candidate) => candidate.status === "ACCEPTED").length,
+      conflicts: accepted.filter((candidate) => candidate.status === "CONFLICT").length,
+      candidates: accepted,
+    });
+    return;
+  }
+  if (path === "/books/42/translation-jobs" && request.method === "POST") {
+    sendJson(response, 201, {
+      job_id: 502,
+      book_id: 42,
+      status: "queued",
+      provider_name: "openai-compatible",
+      model_name: "gpt-5",
+      progress: 0,
+      total_segments: 820,
+      translated_segments: 0,
+      failed_segments: 0,
+      estimated_remaining_seconds: null,
+    });
+    return;
+  }
+  if (path === "/books/42/translation-jobs/resume" && request.method === "POST") {
+    sendJson(response, 200, {
+      job_id: 501,
+      book_id: 42,
+      status: "queued",
+      provider_name: "openai-compatible",
+      model_name: "gpt-5",
+      progress: 0.62,
+      total_segments: 820,
+      translated_segments: 508,
+      failed_segments: 3,
+      estimated_remaining_seconds: 7600,
     });
     return;
   }

@@ -11,6 +11,7 @@ import {
   Download,
   FileText,
   Gauge,
+  Import,
   Languages,
   LibraryBig,
   LogOut,
@@ -45,6 +46,10 @@ import type {
   Role,
   SegmentNote,
   StatusCounts,
+  GlossaryAnalysisResult,
+  GlossaryImportResult,
+  TranslationPromptProfile,
+  TranslationReviewResult,
   TranslationJob,
 } from "./types";
 import { formatBytes, formatDateTime, formatDuration, formatNumber } from "./utils/format";
@@ -225,6 +230,23 @@ type ReaderPageTone = "source" | "translated";
 type LoadBookOptions = { silent?: boolean; syncUrl?: boolean };
 type ArtifactKind = "zh" | "bilingual" | "consistency_report";
 type NotesExportFormat = "markdown" | "json";
+type ReviewMode = "preview" | "apply";
+
+interface PromptProfileDraft {
+  name: string;
+  version: string;
+  styleInstruction: string;
+  translationInstruction: string;
+  reviewInstruction: string;
+  analysisInstruction: string;
+  preserveFormatting: boolean;
+}
+
+interface ReviewDraft {
+  maxSegments: number;
+  minScore: number;
+  applyChanges: boolean;
+}
 
 interface SettingsDraft {
   displayName: string;
@@ -246,6 +268,14 @@ interface ActivityEntry {
   time: string;
   message: string;
 }
+
+const DEFAULT_REVIEW_WARNING_CODES = [
+  "source_repeated_in_translation",
+  "english_residue",
+  "suspicious_length_ratio",
+  "glossary_term_missing",
+  "preserved_token_missing",
+];
 
 const LOGIN_VIEW_COPY: Record<LoginMode, {
   title: string;
@@ -298,6 +328,11 @@ function App() {
   const [selectedReaderSegmentId, setSelectedReaderSegmentId] = useState<number | null>(null);
   const [segmentNotes, setSegmentNotes] = useState<SegmentNote[]>([]);
   const [settingsDraft, setSettingsDraft] = useState<SettingsDraft>(() => loadSettingsDraft());
+  const [promptProfileDraft, setPromptProfileDraft] = useState<PromptProfileDraft>(() => defaultPromptProfileDraft());
+  const [glossaryAnalysis, setGlossaryAnalysis] = useState<GlossaryAnalysisResult | null>(null);
+  const [glossaryImport, setGlossaryImport] = useState<GlossaryImportResult | null>(null);
+  const [reviewDraft, setReviewDraft] = useState<ReviewDraft>(() => defaultReviewDraft());
+  const [reviewResult, setReviewResult] = useState<TranslationReviewResult | null>(null);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [polling, setPolling] = useState(false);
   const [busyAction, setBusyAction] = useState<string | null>(null);
@@ -383,6 +418,12 @@ function App() {
     }
     setSettingsDraft((current) => hydrateSettingsDraft(current, currentUser, selectedProviderProfile));
   }, [currentUser, selectedProviderProfile]);
+
+  useEffect(() => {
+    setGlossaryAnalysis(null);
+    setGlossaryImport(null);
+    setReviewResult(null);
+  }, [currentBookId]);
 
   useEffect(() => {
     setReaderPageIndex((current) => normalizeReaderPageIndex(current, readerSegments.length));
@@ -648,7 +689,7 @@ function App() {
     }
     setBusyAction("translate");
     try {
-      const payload = translationPayload(selectedProviderProfile);
+      const payload = translationPayload(selectedProviderProfile, promptProfileDraft);
       const response = await api.startTranslation(currentBookId, payload);
       appendLog(`翻译任务已启动，任务 #${jobIdOf(response) ?? "?"}。`);
       await loadBook(currentBookId, { silent: true });
@@ -671,12 +712,94 @@ function App() {
     }
     setBusyAction("resume");
     try {
-      const response = await api.resumeTranslation(currentBookId, translationPayload(selectedProviderProfile));
+      const response = await api.resumeTranslation(currentBookId, translationPayload(selectedProviderProfile, promptProfileDraft));
       appendLog(`恢复请求已发送，任务 #${jobIdOf(response) ?? "?"}。`);
       await loadBook(currentBookId, { silent: true });
       await loadBooks({ silent: true });
     } catch (error) {
       appendLog(normalizeError(error, "恢复翻译失败。"));
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function analyzeGlossary() {
+    if (isDemoBookId(currentBookId)) {
+      appendLog("演示书不需要运行术语分析。");
+      return;
+    }
+    if (!currentBookId || !isMemberLike) {
+      appendLog("请先加载书籍，并确认当前角色有术语分析权限。");
+      return;
+    }
+    setBusyAction("glossary-analysis");
+    try {
+      const response = await api.analyzeGlossary(currentBookId, {
+        ...translationPayload(selectedProviderProfile, promptProfileDraft),
+        maxSegments: 120,
+        persistCandidates: true,
+      });
+      setGlossaryAnalysis(response);
+      setGlossaryImport(null);
+      appendLog(`术语分析完成，扫描 ${response.analyzedSegments} 段，得到 ${response.candidateCount} 个候选。`);
+    } catch (error) {
+      appendLog(normalizeError(error, "术语分析失败。"));
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function acceptGlossaryCandidates() {
+    if (isDemoBookId(currentBookId)) {
+      appendLog("演示书的术语候选不可导入。");
+      return;
+    }
+    if (!currentBookId || !isMemberLike) {
+      appendLog("请先加载书籍，并确认当前角色有术语导入权限。");
+      return;
+    }
+    setBusyAction("glossary-accept");
+    try {
+      const response = await api.acceptGlossaryCandidates(currentBookId);
+      setGlossaryImport(response);
+      appendLog(`术语候选已接受 ${response.acceptedCandidates} 项，冲突 ${response.conflicts} 项。`);
+    } catch (error) {
+      appendLog(normalizeError(error, "导入术语候选失败。"));
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function reviewTranslation(mode: ReviewMode) {
+    if (isDemoBookId(currentBookId)) {
+      appendLog("演示书不需要运行审校。");
+      return;
+    }
+    if (!currentBookId || !isMemberLike) {
+      appendLog("请先加载书籍，并确认当前角色有审校权限。");
+      return;
+    }
+    const applyChanges = mode === "apply" && reviewDraft.applyChanges;
+    setBusyAction(applyChanges ? "review-apply" : "review-preview");
+    try {
+      const response = await api.reviewTranslation(currentBookId, {
+        providerName: selectedProviderProfile?.provider_name,
+        modelName: selectedProviderProfile?.default_model_name,
+        maxSegments: reviewDraft.maxSegments,
+        minScore: reviewDraft.minScore,
+        warningCodes: DEFAULT_REVIEW_WARNING_CODES,
+        applyChanges,
+      });
+      setReviewResult(response);
+      appendLog(applyChanges
+        ? `审校已应用，更新 ${response.updatedSegments ?? response.updated_segments ?? 0} 段。`
+        : `审校预览完成，选中 ${response.selectedSegments ?? response.selected_segments ?? 0} 个风险段。`);
+      if (applyChanges) {
+        await loadBook(currentBookId, { silent: true });
+        await loadBooks({ silent: true });
+      }
+    } catch (error) {
+      appendLog(normalizeError(error, applyChanges ? "应用审校失败。" : "审校预览失败。"));
     } finally {
       setBusyAction(null);
     }
@@ -1092,6 +1215,11 @@ function App() {
               artifacts={artifacts}
               providerProfiles={providerProfiles}
               selectedProviderProfileName={selectedProviderProfileName}
+              promptProfileDraft={promptProfileDraft}
+              glossaryAnalysis={glossaryAnalysis}
+              glossaryImport={glossaryImport}
+              reviewDraft={reviewDraft}
+              reviewResult={reviewResult}
               activity={activity}
               busyAction={busyAction}
               fileInputRef={fileInputRef}
@@ -1106,6 +1234,11 @@ function App() {
                 setSelectedProviderProfileName(value);
                 localStorage.setItem(PROVIDER_PROFILE_STORAGE_KEY, value);
               }}
+              onPromptProfileChange={setPromptProfileDraft}
+              onAnalyzeGlossary={() => void analyzeGlossary()}
+              onAcceptGlossaryCandidates={() => void acceptGlossaryCandidates()}
+              onReviewDraftChange={setReviewDraft}
+              onReview={(mode) => void reviewTranslation(mode)}
               onGenerate={(kind) => void generateArtifact(kind)}
               onDownload={(kind) => void downloadArtifact(kind)}
             />
@@ -1336,6 +1469,11 @@ function TranslatePage(props: {
   artifacts: ExportArtifact[];
   providerProfiles: ProviderProfile[];
   selectedProviderProfileName: string | null;
+  promptProfileDraft: PromptProfileDraft;
+  glossaryAnalysis: GlossaryAnalysisResult | null;
+  glossaryImport: GlossaryImportResult | null;
+  reviewDraft: ReviewDraft;
+  reviewResult: TranslationReviewResult | null;
   activity: ActivityEntry[];
   busyAction: string | null;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
@@ -1347,6 +1485,11 @@ function TranslatePage(props: {
   onCancel: () => void;
   onUpdateTitle: () => void;
   onProviderChange: (value: string) => void;
+  onPromptProfileChange: (draft: PromptProfileDraft) => void;
+  onAnalyzeGlossary: () => void;
+  onAcceptGlossaryCandidates: () => void;
+  onReviewDraftChange: (draft: ReviewDraft) => void;
+  onReview: (mode: ReviewMode) => void;
   onGenerate: (kind: ArtifactKind) => void;
   onDownload: (kind: ArtifactKind) => void;
 }) {
@@ -1355,6 +1498,12 @@ function TranslatePage(props: {
   const activeJob = ["pending", "queued", "running"].includes(String(props.job?.status || "").toLowerCase());
   const canResume = Boolean(props.currentBook && ["failed", "canceled"].includes(String(props.job?.status || "").toLowerCase()));
   const canRun = props.isMemberLike && Boolean(props.currentBook) && Boolean(props.providerProfiles.length) && !activeJob;
+  const canPrepare = props.isMemberLike && Boolean(props.currentBook) && Boolean(props.providerProfiles.length) && !activeJob;
+  const analyzedCandidates = props.glossaryAnalysis?.candidates || [];
+  const acceptedCandidates = props.glossaryImport?.acceptedCandidates ?? 0;
+  const conflicts = props.glossaryImport?.conflicts ?? analyzedCandidates.filter((candidate) => candidate.status === "CONFLICT").length;
+  const selectedReviewSegments = props.reviewResult?.selectedSegments ?? props.reviewResult?.selected_segments ?? 0;
+  const updatedReviewSegments = props.reviewResult?.updatedSegments ?? props.reviewResult?.updated_segments ?? 0;
   return (
     <section className="page-view active">
       <div className="translate-grid">
@@ -1390,6 +1539,130 @@ function TranslatePage(props: {
               <button className="button button-secondary full" type="button" onClick={props.onResume} disabled={!props.isMemberLike || !canResume}><RotateCcw size={16} />恢复任务</button>
               <button className="button button-danger full" type="button" onClick={props.onCancel} disabled={!props.isMemberLike || !activeJob}><XCircle size={16} />取消任务</button>
             </form>
+          </section>
+          <section className="tool-panel">
+            <div className="section-heading compact-heading"><div><p className="eyebrow">Rules</p><h2><Settings size={18} />规则快照</h2></div></div>
+            <div className="prompt-profile-form">
+              <label className="field">
+                <span>规则名称</span>
+                <input
+                  value={props.promptProfileDraft.name}
+                  onChange={(event) => props.onPromptProfileChange({ ...props.promptProfileDraft, name: event.target.value })}
+                  disabled={!props.isMemberLike}
+                />
+              </label>
+              <label className="field">
+                <span>版本</span>
+                <input
+                  value={props.promptProfileDraft.version}
+                  onChange={(event) => props.onPromptProfileChange({ ...props.promptProfileDraft, version: event.target.value })}
+                  disabled={!props.isMemberLike}
+                />
+              </label>
+              <label className="field wide-field">
+                <span>风格约束</span>
+                <textarea
+                  value={props.promptProfileDraft.styleInstruction}
+                  onChange={(event) => props.onPromptProfileChange({ ...props.promptProfileDraft, styleInstruction: event.target.value })}
+                  disabled={!props.isMemberLike}
+                  rows={3}
+                />
+              </label>
+              <label className="field wide-field">
+                <span>翻译约束</span>
+                <textarea
+                  value={props.promptProfileDraft.translationInstruction}
+                  onChange={(event) => props.onPromptProfileChange({ ...props.promptProfileDraft, translationInstruction: event.target.value })}
+                  disabled={!props.isMemberLike}
+                  rows={3}
+                />
+              </label>
+              <label className="toggle-field wide-field">
+                <input
+                  type="checkbox"
+                  checked={props.promptProfileDraft.preserveFormatting}
+                  onChange={(event) => props.onPromptProfileChange({ ...props.promptProfileDraft, preserveFormatting: event.target.checked })}
+                  disabled={!props.isMemberLike}
+                />
+                <span>保留列表、脚注、链接和内联标记</span>
+              </label>
+            </div>
+          </section>
+          <section className="tool-panel">
+            <div className="section-heading compact-heading"><div><p className="eyebrow">Glossary</p><h2><Import size={18} />术语 / 人名</h2></div></div>
+            <div className="quality-action-stack">
+              <button className="button button-secondary full" type="button" onClick={props.onAnalyzeGlossary} disabled={!canPrepare || props.busyAction === "glossary-analysis"}>
+                {props.busyAction === "glossary-analysis" ? "分析中..." : "分析候选术语"}
+              </button>
+              <button className="button button-primary full" type="button" onClick={props.onAcceptGlossaryCandidates} disabled={!canPrepare || !analyzedCandidates.length || props.busyAction === "glossary-accept"}>
+                接受安全候选
+              </button>
+            </div>
+            <div className="quality-summary-grid" aria-label="术语分析摘要">
+              <div><span>扫描段落</span><strong>{formatNumber(props.glossaryAnalysis?.analyzedSegments || 0)}</strong></div>
+              <div><span>候选</span><strong>{formatNumber(props.glossaryAnalysis?.candidateCount || 0)}</strong></div>
+              <div><span>已接受</span><strong>{formatNumber(acceptedCandidates)}</strong></div>
+              <div><span>冲突</span><strong className={conflicts ? "danger-text" : ""}>{formatNumber(conflicts)}</strong></div>
+            </div>
+            {analyzedCandidates.length ? (
+              <div className="glossary-candidate-list">
+                {analyzedCandidates.slice(0, 6).map((candidate, index) => (
+                  <article key={candidate.candidateId || `${candidate.sourceTerm}-${index}`} className="glossary-candidate-card">
+                    <header>
+                      <strong>{candidate.sourceTerm}</strong>
+                      <span className={`status-pill ${candidate.status === "CONFLICT" ? "status-failed" : candidate.status === "ACCEPTED" ? "status-success" : "status-neutral"}`}>{candidate.status}</span>
+                    </header>
+                    <p>{candidate.targetTerm || candidate.category || "待确认译名"}</p>
+                  </article>
+                ))}
+              </div>
+            ) : <p className="profile-summary">分析后会显示候选人名、地名、组织和书内概念。</p>}
+          </section>
+          <section className="tool-panel">
+            <div className="section-heading compact-heading"><div><p className="eyebrow">Review</p><h2><CheckCircle2 size={18} />质量审校</h2></div></div>
+            <div className="review-budget-grid">
+              <label className="field">
+                <span>最多段落</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={props.reviewDraft.maxSegments}
+                  onChange={(event) => props.onReviewDraftChange({ ...props.reviewDraft, maxSegments: numberFromInput(event.target.value, props.reviewDraft.maxSegments) })}
+                  disabled={!props.isMemberLike}
+                />
+              </label>
+              <label className="field">
+                <span>最低分</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={props.reviewDraft.minScore}
+                  onChange={(event) => props.onReviewDraftChange({ ...props.reviewDraft, minScore: clamp(numberFromInput(event.target.value, props.reviewDraft.minScore)) })}
+                  disabled={!props.isMemberLike}
+                />
+              </label>
+              <label className="toggle-field wide-field">
+                <input
+                  type="checkbox"
+                  checked={props.reviewDraft.applyChanges}
+                  onChange={(event) => props.onReviewDraftChange({ ...props.reviewDraft, applyChanges: event.target.checked })}
+                  disabled={!props.isMemberLike}
+                />
+                <span>应用时只修风险段</span>
+              </label>
+            </div>
+            <div className="quality-action-stack two">
+              <button className="button button-secondary full" type="button" onClick={() => props.onReview("preview")} disabled={!canPrepare || props.busyAction === "review-preview"}>预览风险段</button>
+              <button className="button button-primary full" type="button" onClick={() => props.onReview("apply")} disabled={!canPrepare || !props.reviewDraft.applyChanges || props.busyAction === "review-apply"}>应用审校</button>
+            </div>
+            <div className="quality-summary-grid" aria-label="审校摘要">
+              <div><span>候选</span><strong>{formatNumber(props.reviewResult?.candidateSegments ?? props.reviewResult?.candidate_segments ?? 0)}</strong></div>
+              <div><span>选中</span><strong>{formatNumber(selectedReviewSegments)}</strong></div>
+              <div><span>已审</span><strong>{formatNumber(props.reviewResult?.reviewedSegments ?? props.reviewResult?.reviewed_segments ?? 0)}</strong></div>
+              <div><span>更新</span><strong className={updatedReviewSegments ? "accent-text" : ""}>{formatNumber(updatedReviewSegments)}</strong></div>
+            </div>
           </section>
         </aside>
         <section className={`translate-workspace${props.currentBook ? "" : " is-empty"}`}>
@@ -1995,8 +2268,42 @@ function providerSummary(profiles: ProviderProfile[], selectedName: string | nul
   return `当前使用 ${profile.profile_name}，provider 为 ${profile.provider_name}，模型为 ${profile.default_model_name}，状态 ${profile.configured ? "已配置" : "未配置"}。`;
 }
 
-function translationPayload(profile: ProviderProfile | null) {
-  return profile ? { providerName: profile.provider_name, modelName: profile.default_model_name } : {};
+function translationPayload(profile: ProviderProfile | null, promptDraft?: PromptProfileDraft) {
+  const payload = profile ? { providerName: profile.provider_name, modelName: profile.default_model_name } : {};
+  const promptProfile = promptDraft ? promptProfilePayload(promptDraft) : null;
+  return promptProfile ? { ...payload, promptProfile } : payload;
+}
+
+function promptProfilePayload(draft: PromptProfileDraft): TranslationPromptProfile {
+  return {
+    name: draft.name.trim() || "book-editorial",
+    version: draft.version.trim() || "v1",
+    styleInstruction: draft.styleInstruction.trim(),
+    translationInstruction: draft.translationInstruction.trim(),
+    reviewInstruction: draft.reviewInstruction.trim(),
+    analysisInstruction: draft.analysisInstruction.trim(),
+    preserveFormatting: draft.preserveFormatting,
+  };
+}
+
+function defaultPromptProfileDraft(): PromptProfileDraft {
+  return {
+    name: "book-editorial",
+    version: "v1",
+    styleInstruction: "自然、准确、保留叙事声调，不随意增删信息。",
+    translationInstruction: "逐段翻译为中文，术语、人名和格式保持一致。",
+    reviewInstruction: "只修正明确问题，不重译整段，不改变已通顺的表达。",
+    analysisInstruction: "提取反复出现的人名、地名、组织、家族和专有概念。",
+    preserveFormatting: true,
+  };
+}
+
+function defaultReviewDraft(): ReviewDraft {
+  return {
+    maxSegments: 20,
+    minScore: 80,
+    applyChanges: false,
+  };
 }
 
 function defaultSettingsDraft(): SettingsDraft {

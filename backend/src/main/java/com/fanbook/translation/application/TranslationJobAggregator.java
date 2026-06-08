@@ -59,7 +59,8 @@ public class TranslationJobAggregator {
         }
         refreshProgress(job);
         long completed = chunks.stream()
-                .filter(chunk -> chunk.getStatus() == TranslationChunkStatus.COMPLETED)
+                .filter(chunk -> chunk.getStatus() == TranslationChunkStatus.COMPLETED
+                        || chunk.getStatus() == TranslationChunkStatus.SUPERSEDED)
                 .count();
         long exhausted = chunks.stream()
                 .filter(chunk -> chunk.getStatus() == TranslationChunkStatus.FAILED && chunk.getAttemptCount() >= maxAttempts)

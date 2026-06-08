@@ -6,11 +6,14 @@ import type {
   CsrfState,
   CurrentUser,
   ExportArtifact,
+  GlossaryAnalysisResult,
+  GlossaryImportResult,
   ProviderProfile,
   ReaderSegment,
   Role,
   SegmentNote,
   TranslationJob,
+  TranslationPromptProfile,
   TranslationReviewResult,
 } from "../types";
 
@@ -27,6 +30,15 @@ export interface LoginPayload {
 export interface TranslationPayload {
   providerName?: string;
   modelName?: string | null;
+  promptProfile?: TranslationPromptProfile;
+}
+
+export interface GlossaryAnalysisPayload {
+  providerName?: string;
+  modelName?: string | null;
+  maxSegments?: number;
+  persistCandidates?: boolean;
+  promptProfile?: TranslationPromptProfile;
 }
 
 export interface TranslationReviewPayload {
@@ -127,6 +139,14 @@ export class ApiClient {
 
   reviewTranslation(bookId: number, payload: TranslationReviewPayload): Promise<TranslationReviewResult> {
     return this.request(`/books/${bookId}/translation-review`, { method: "POST", body: payload });
+  }
+
+  analyzeGlossary(bookId: number, payload: GlossaryAnalysisPayload): Promise<GlossaryAnalysisResult> {
+    return this.request(`/books/${bookId}/translation-glossary-analysis`, { method: "POST", body: payload });
+  }
+
+  acceptGlossaryCandidates(bookId: number): Promise<GlossaryImportResult> {
+    return this.request(`/books/${bookId}/translation-glossary-candidates/accept`, { method: "POST" });
   }
 
   generateArtifact(bookId: number, kind: "zh" | "bilingual" | "consistency_report"): Promise<ExportArtifact> {
@@ -251,6 +271,8 @@ export function createEndpoint(apiBase = "/api") {
     resumeTranslation: (bookId: number | string) => `${apiBase}/books/${bookId}/translation-jobs/resume`,
     cancelTranslation: (jobId: number | string) => `${apiBase}/translation-jobs/${jobId}/cancel`,
     reviewTranslation: (bookId: number | string) => `${apiBase}/books/${bookId}/translation-review`,
+    glossaryAnalysis: (bookId: number | string) => `${apiBase}/books/${bookId}/translation-glossary-analysis`,
+    acceptGlossaryCandidates: (bookId: number | string) => `${apiBase}/books/${bookId}/translation-glossary-candidates/accept`,
     exportZh: (bookId: number | string) => `${apiBase}/books/${bookId}/exports/zh`,
     exportBilingual: (bookId: number | string) => `${apiBase}/books/${bookId}/exports/bilingual`,
     consistencyReport: (bookId: number | string) => `${apiBase}/books/${bookId}/reports/consistency`,

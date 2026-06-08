@@ -85,13 +85,33 @@ class TranslationMessagingAcceptanceTest {
     }
 
     @Test
-    void exhaustedChunkFailsJob() {
+    void exhaustedMultiSegmentChunkSplitsInsteadOfFailingJob() {
         Fixture fixture = createJobWithOneChunk("failing");
 
         consumer.handleForTest(ChunkMessage.start(fixture.jobId(), fixture.chunkId()));
         consumer.handleForTest(new ChunkMessage("1.0", fixture.jobId(), fixture.chunkId(), 2, "RETRY", "retry-2", OffsetDateTime.now()));
         consumer.handleForTest(new ChunkMessage("1.0", fixture.jobId(), fixture.chunkId(), 3, "RETRY", "retry-3", OffsetDateTime.now()));
 
+        assertThat(chunkRepository.findById(fixture.chunkId()).orElseThrow().getStatus())
+                .isEqualTo(TranslationChunkStatus.SUPERSEDED);
+        assertThat(jobRepository.findById(fixture.jobId()).orElseThrow().getStatus())
+                .isNotEqualTo(TranslationJobStatus.FAILED);
+        assertThat(publisher.messages())
+                .filteredOn(message -> message.dispatchReason().equals("START"))
+                .hasSize(2);
+    }
+
+    @Test
+    void exhaustedSingleSegmentChunkFailsJob() {
+        Fixture fixture = createSingleSegmentJobWithOneChunk("failing");
+
+        consumer.handleForTest(ChunkMessage.start(fixture.jobId(), fixture.chunkId()));
+        consumer.handleForTest(new ChunkMessage("1.0", fixture.jobId(), fixture.chunkId(), 2, "RETRY", "retry-2", OffsetDateTime.now()));
+        consumer.handleForTest(new ChunkMessage("1.0", fixture.jobId(), fixture.chunkId(), 3, "RETRY", "retry-3", OffsetDateTime.now()));
+
+        assertThat(publisher.messages())
+                .filteredOn(message -> message.dispatchReason().equals("START"))
+                .isEmpty();
         assertThat(jobRepository.findById(fixture.jobId()).orElseThrow().getStatus())
                 .isEqualTo(TranslationJobStatus.FAILED);
     }
@@ -125,8 +145,17 @@ class TranslationMessagingAcceptanceTest {
 
     private Fixture createJobWithOneChunk(String providerName) {
         var book = bookApplicationService.upload("demo.epub", MinimalEpubFactory.create(), "en");
+        return createJobWithOneChunk(book.bookId(), providerName);
+    }
+
+    private Fixture createSingleSegmentJobWithOneChunk(String providerName) {
+        var book = bookApplicationService.upload("single.epub", MinimalEpubFactory.create("<p>Hello world.</p>"), "en");
+        return createJobWithOneChunk(book.bookId(), providerName);
+    }
+
+    private Fixture createJobWithOneChunk(Long bookId, String providerName) {
         var job = translationJobService.startWithoutDispatch(
-                book.bookId(),
+                bookId,
                 new StartTranslationRequest(providerName, "mock-translator"),
                 "system"
         );

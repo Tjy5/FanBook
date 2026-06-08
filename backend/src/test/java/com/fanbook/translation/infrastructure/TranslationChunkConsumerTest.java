@@ -115,8 +115,53 @@ class TranslationChunkConsumerTest {
     }
 
     @Test
-    void exhaustedBusinessFailureFailsJobWithoutPublishingRetry() {
+    void exhaustedMultiSegmentBusinessFailureSplitsChunkAndPublishesChildren() {
         var book = bookApplicationService.upload("demo.epub", MinimalEpubFactory.create(), "en");
+        var job = translationJobService.startWithoutDispatch(
+                book.bookId(),
+                new StartTranslationRequest("missing", "mock-translator"),
+                "system"
+        );
+        var chunk = chunkRepository.findByJobIdOrderByChunkOrderAsc(job.jobId()).getFirst();
+        chunk.markRunning(java.time.OffsetDateTime.now());
+        chunk.markFailed("provider_not_found", "missing", java.time.OffsetDateTime.now());
+        chunk.markRunning(java.time.OffsetDateTime.now());
+        chunk.markFailed("provider_not_found", "missing", java.time.OffsetDateTime.now());
+        chunkRepository.saveAndFlush(chunk);
+
+        var action = consumer.handleForTest(new ChunkMessage(
+                "1.0",
+                job.jobId(),
+                chunk.getId(),
+                3,
+                "RETRY",
+                "retry-exhausted",
+                java.time.OffsetDateTime.now()
+        ));
+
+        assertThat(action).isEqualTo(ChunkDeliveryAction.ACK);
+        assertThat(publisher.messages())
+                .hasSize(2)
+                .allSatisfy(message -> {
+                    assertThat(message.dispatchReason()).isEqualTo("START");
+                    assertThat(message.jobId()).isEqualTo(job.jobId());
+                });
+        assertThat(chunkRepository.findById(chunk.getId()).orElseThrow().getStatus())
+                .isEqualTo(TranslationChunkStatus.SUPERSEDED);
+        assertThat(chunkRepository.findByJobIdOrderByChunkOrderAsc(job.jobId()))
+                .filteredOn(child -> child.getParentChunk() != null && child.getParentChunk().getId().equals(chunk.getId()))
+                .hasSize(2)
+                .allSatisfy(child -> {
+                    assertThat(child.getStatus()).isEqualTo(TranslationChunkStatus.PENDING);
+                    assertThat(child.getDegradationDepth()).isEqualTo(1);
+                });
+        assertThat(jobRepository.findById(job.jobId()).orElseThrow().getStatus())
+                .isNotEqualTo(TranslationJobStatus.FAILED);
+    }
+
+    @Test
+    void exhaustedSingleSegmentBusinessFailureFailsJobWithoutPublishingRetry() {
+        var book = bookApplicationService.upload("single.epub", MinimalEpubFactory.create("<p>Hello world.</p>"), "en");
         var job = translationJobService.startWithoutDispatch(
                 book.bookId(),
                 new StartTranslationRequest("missing", "mock-translator"),

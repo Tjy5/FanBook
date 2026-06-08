@@ -38,6 +38,7 @@ public class TranslationJobService {
     private final TranslationChunkPublisher chunkPublisher;
     private final TranslationChunkPlanningProperties chunkPlanningProperties;
     private final BookAccessService bookAccessService;
+    private final TranslationRuleSnapshotService ruleSnapshotService;
     private final ObjectMapper objectMapper = JsonMapper.builder().build();
 
     public TranslationJobService(
@@ -47,7 +48,8 @@ public class TranslationJobService {
             ActiveTranslationSessionRepository activeSessionRepository,
             TranslationChunkPlanningProperties chunkPlanningProperties,
             ObjectProvider<TranslationChunkPublisher> chunkPublisherProvider,
-            BookAccessService bookAccessService
+            BookAccessService bookAccessService,
+            TranslationRuleSnapshotService ruleSnapshotService
     ) {
         this.segmentRepository = segmentRepository;
         this.jobRepository = jobRepository;
@@ -57,6 +59,7 @@ public class TranslationJobService {
         this.chunkPublisher = chunkPublisherProvider.getIfAvailable(() -> message -> {
         });
         this.bookAccessService = bookAccessService;
+        this.ruleSnapshotService = ruleSnapshotService;
     }
 
     @Transactional
@@ -120,6 +123,7 @@ public class TranslationJobService {
         );
         job.updateProgress(segments.size(), 0, 0, 0);
         jobRepository.save(job);
+        job.attachRuleSnapshot(ruleSnapshotService.capture(job.getBook(), request));
 
         ChunkPlanner planner = new ChunkPlanner(
                 chunkPlanningProperties.chunkTargetCharacters(),

@@ -36,6 +36,10 @@ public class TranslationJobEntity {
     @Column(name = "model_name", nullable = false, length = 128)
     private String modelName;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "rule_snapshot_id")
+    private TranslationRuleSnapshotEntity ruleSnapshot;
+
     @Column(name = "total_segments", nullable = false)
     private int totalSegments;
 
@@ -103,6 +107,10 @@ public class TranslationJobEntity {
         return modelName;
     }
 
+    public TranslationRuleSnapshotEntity getRuleSnapshot() {
+        return ruleSnapshot;
+    }
+
     public int getTotalSegments() {
         return totalSegments;
     }
@@ -146,6 +154,10 @@ public class TranslationJobEntity {
     public void markRunning(OffsetDateTime startedAt) {
         this.status = TranslationJobStatus.RUNNING;
         this.startedAt = startedAt;
+    }
+
+    public void attachRuleSnapshot(TranslationRuleSnapshotEntity ruleSnapshot) {
+        this.ruleSnapshot = ruleSnapshot;
     }
 
     public void markQueued() {

@@ -13,6 +13,15 @@ public final class TranslationQualityAnalyzer {
             List<SegmentEntity> segments,
             List<StructuredTranslationGlossaryItem> glossary
     ) {
+        return analyze(segments, glossary, TranslationPreservationOptions.defaults());
+    }
+
+    public TranslationQualityAnalysis analyze(
+            List<SegmentEntity> segments,
+            List<StructuredTranslationGlossaryItem> glossary,
+            TranslationPreservationOptions preservation
+    ) {
+        TranslationTextProtector textProtector = new TranslationTextProtector();
         List<ConsistencyWarning> warnings = new ArrayList<>();
         List<ConsistencyWarning> termWarnings = new ArrayList<>();
         List<SegmentQualityScore> segmentScores = new ArrayList<>();
@@ -72,6 +81,17 @@ public final class TranslationQualityAnalyzer {
                 ));
                 score -= 20;
                 reasons.add("suspicious_length_ratio");
+            }
+            List<String> missingTokens = textProtector.missingPreservedTokens(segment.getSourceText(), segment.getTranslatedText(), preservation);
+            if (!missingTokens.isEmpty()) {
+                warnings.add(warning(
+                        "preserved_token_missing",
+                        "warning",
+                        segment,
+                        "Translated text is missing preserved source token(s): " + String.join(", ", missingTokens)
+                ));
+                score -= 20;
+                reasons.add("preserved_token_missing");
             }
             for (var glossaryItem : glossary == null ? List.<StructuredTranslationGlossaryItem>of() : glossary) {
                 if (hasGlossaryMismatch(source, translated, glossaryItem)) {

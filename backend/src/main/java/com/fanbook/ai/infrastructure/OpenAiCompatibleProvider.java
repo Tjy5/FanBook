@@ -4,11 +4,17 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fanbook.ai.domain.AiTranslationProvider;
+import com.fanbook.ai.domain.StructuredGlossaryAnalysisRequest;
+import com.fanbook.ai.domain.StructuredGlossaryAnalysisResult;
 import com.fanbook.ai.domain.StructuredTranslationReviewRequest;
 import com.fanbook.ai.domain.StructuredTranslationRequest;
 import com.fanbook.ai.domain.StructuredTranslationResult;
+import com.fanbook.ai.domain.TranslationPromptProfile;
+import com.fanbook.translation.application.TranslationPreservationOptions;
 import com.fanbook.common.error.ErrorCode;
 import com.fanbook.common.error.FanbookException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Semaphore;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -45,6 +51,13 @@ public class OpenAiCompatibleProvider implements AiTranslationProvider {
             Do not merge, split, omit, or reorder segments.
             If a segment has no obvious problem beyond the warning signal, return its current translation unchanged.
             """;
+    private static final String ANALYSIS_INSTRUCTIONS = """
+            Analyze source-language book segments and extract only true proper nouns or book-specific terminology.
+            Return JSON only with shape {"candidates":[{"sourceTerm":string,"targetTerm":string|null,"category":string,"note":string,"segmentId":number|null}]}.
+            Prefer people, places, organizations, families, unique fictional concepts, special objects, and recurring named entities.
+            Ignore generic common nouns, generic titles, relationship words, and ordinary dictionary terms.
+            Keep sourceTerm boundaries precise and do not include surrounding titles or descriptions unless they are part of the name.
+            """;
 
     private final RestClient restClient;
     private final ObjectMapper objectMapper;
@@ -74,15 +87,48 @@ public class OpenAiCompatibleProvider implements AiTranslationProvider {
 
     @Override
     public StructuredTranslationResult translateChunk(StructuredTranslationRequest request, String modelName) {
-        return sendStructuredRequest(STRUCTURED_OUTPUT_INSTRUCTIONS, request, modelName);
+        return sendStructuredTranslationRequest(instructions(STRUCTURED_OUTPUT_INSTRUCTIONS, request.promptProfile(), request.preservation(), "translation"), request, modelName);
     }
 
     @Override
     public StructuredTranslationResult reviewTranslations(StructuredTranslationReviewRequest request, String modelName) {
-        return sendStructuredRequest(REVIEW_INSTRUCTIONS, request, modelName);
+        return sendStructuredTranslationRequest(instructions(REVIEW_INSTRUCTIONS, request.promptProfile(), request.preservation(), "review"), request, modelName);
     }
 
-    private StructuredTranslationResult sendStructuredRequest(String instructions, Object request, String modelName) {
+    @Override
+    public StructuredGlossaryAnalysisResult analyzeGlossary(StructuredGlossaryAnalysisRequest request, String modelName) {
+        requireApiKey();
+        acquirePermit();
+        try {
+            String resolvedModelName = modelName == null || modelName.isBlank() ? properties.model() : modelName;
+            Map<String, Object> payload = Map.of(
+                    "model", resolvedModelName,
+                    "instructions", instructions(ANALYSIS_INSTRUCTIONS, request.promptProfile(), request.preservation(), "analysis"),
+                    "input", objectMapper.writeValueAsString(request)
+            );
+            String body = restClient.post()
+                    .uri("/responses")
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + properties.apiKey())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(payload)
+                    .retrieve()
+                    .body(String.class);
+            StructuredGlossaryAnalysisResult parsed = objectMapper.readValue(outputText(body), StructuredGlossaryAnalysisResult.class);
+            return new StructuredGlossaryAnalysisResult(parsed.candidates(), name(), resolvedModelName);
+        } catch (FanbookException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new FanbookException(
+                    ErrorCode.PROVIDER_REQUEST_FAILED,
+                    HttpStatus.BAD_GATEWAY,
+                    exception.getMessage()
+            );
+        } finally {
+            semaphore.release();
+        }
+    }
+
+    private StructuredTranslationResult sendStructuredTranslationRequest(String instructions, Object request, String modelName) {
         requireApiKey();
         acquirePermit();
         try {
@@ -112,6 +158,56 @@ public class OpenAiCompatibleProvider implements AiTranslationProvider {
         } finally {
             semaphore.release();
         }
+    }
+
+    private static String instructions(
+            String base,
+            TranslationPromptProfile profile,
+            TranslationPreservationOptions preservation,
+            String task
+    ) {
+        TranslationPromptProfile safeProfile = profile == null ? TranslationPromptProfile.defaults() : profile;
+        List<String> parts = new ArrayList<>();
+        parts.add(base.strip());
+        if (!safeProfile.styleInstruction().isBlank()) {
+            parts.add("Style profile:\n" + safeProfile.styleInstruction());
+        }
+        String taskInstruction = switch (task) {
+            case "review" -> safeProfile.reviewInstruction();
+            case "analysis" -> safeProfile.analysisInstruction();
+            default -> safeProfile.translationInstruction();
+        };
+        if (!taskInstruction.isBlank()) {
+            parts.add("Task-specific profile instructions:\n" + taskInstruction);
+        }
+        if (safeProfile.preserveFormatting()) {
+            parts.add("Preservation rules:\n" + preservationInstructions(preservation));
+        }
+        return String.join("\n\n", parts);
+    }
+
+    private static String preservationInstructions(TranslationPreservationOptions preservation) {
+        TranslationPreservationOptions options = preservation == null ? TranslationPreservationOptions.defaults() : preservation;
+        List<String> rules = new ArrayList<>();
+        if (options.urls()) {
+            rules.add("Preserve URLs exactly.");
+        }
+        if (options.emails()) {
+            rules.add("Preserve email-like strings exactly.");
+        }
+        if (options.footnoteMarkers()) {
+            rules.add("Preserve footnote and reference markers such as [1], (1), and superscript-like markers.");
+        }
+        if (options.inlineMarkup()) {
+            rules.add("Preserve inline markup-like tags and attributes exactly while translating surrounding natural language.");
+        }
+        if (options.listNumbering()) {
+            rules.add("Preserve list numbering and bullet markers.");
+        }
+        if (options.codeLikeSpans()) {
+            rules.add("Preserve formula-like or code-like spans exactly unless they contain ordinary natural language.");
+        }
+        return rules.isEmpty() ? "Preserve book formatting and non-natural-language markers." : String.join("\n", rules);
     }
 
     private void requireApiKey() {

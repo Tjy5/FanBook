@@ -78,6 +78,8 @@ for (const fragment of [
   "createEndpoint",
   "/exports/zh",
   "/reports/consistency",
+  "/translation-glossary-analysis",
+  "/translation-glossary-candidates/accept",
 ]) {
   assert.ok(apiClient.includes(fragment), `Expected API client to include ${fragment}`);
 }

@@ -37,6 +37,8 @@ public class TranslationChunkWorker {
     private final StructuredTranslationValidator validator;
     private final TranslationCacheService cacheService;
     private final TranslationChunkPlanningProperties chunkPlanningProperties;
+    private final TranslationRuleSnapshotService ruleSnapshotService;
+    private final TranslationTextProtector textProtector;
     private final TranslationGlossaryBuilder glossaryBuilder = new TranslationGlossaryBuilder();
     private final ObjectMapper objectMapper = JsonMapper.builder().build();
 
@@ -46,7 +48,9 @@ public class TranslationChunkWorker {
             ProviderFactory providerFactory,
             StructuredTranslationValidator validator,
             TranslationCacheService cacheService,
-            TranslationChunkPlanningProperties chunkPlanningProperties
+            TranslationChunkPlanningProperties chunkPlanningProperties,
+            TranslationRuleSnapshotService ruleSnapshotService,
+            TranslationTextProtector textProtector
     ) {
         this.chunkRepository = chunkRepository;
         this.segmentRepository = segmentRepository;
@@ -54,6 +58,8 @@ public class TranslationChunkWorker {
         this.validator = validator;
         this.cacheService = cacheService;
         this.chunkPlanningProperties = chunkPlanningProperties;
+        this.ruleSnapshotService = ruleSnapshotService;
+        this.textProtector = textProtector;
     }
 
     @Transactional
@@ -62,15 +68,17 @@ public class TranslationChunkWorker {
                 .orElseThrow(() -> notFound("Translation chunk '" + chunkId + "' was not found."));
         List<Long> segmentIds = parseSegmentIds(chunk.getSegmentIdsJson());
         List<SegmentEntity> segments = orderedSegments(segmentIds);
+        TranslationRuleSnapshotData snapshot = ruleSnapshotService.dataForJob(chunk.getJob());
+        String cachePromptVersion = snapshot.cachePromptVersion();
         List<SegmentEntity> missSegments = new ArrayList<>();
         for (SegmentEntity segment : segments) {
-            cacheService.lookup(segment, chunk.getJob(), "zh", "v1")
+            cacheService.lookup(segment, chunk.getJob(), snapshot.targetLanguage(), cachePromptVersion)
                     .ifPresentOrElse(segment::markTranslated, () -> missSegments.add(segment));
         }
 
         if (!missSegments.isEmpty()) {
             List<Long> missIds = missSegments.stream().map(SegmentEntity::getId).toList();
-            StructuredTranslationRequest request = buildRequest(chunk, segmentIds, missIds, missSegments);
+            StructuredTranslationRequest request = buildRequest(chunk, segmentIds, missIds, missSegments, snapshot);
             var provider = providerFactory.getProvider(chunk.getJob().getProviderName());
             var result = provider.translateChunk(request, chunk.getJob().getModelName());
             validator.validate(missIds, result);
@@ -79,8 +87,9 @@ public class TranslationChunkWorker {
                     .collect(Collectors.toMap(SegmentEntity::getId, Function.identity()));
             for (StructuredTranslationItem item : result.items()) {
                 SegmentEntity segment = segmentById.get(item.segmentId());
-                segment.markTranslated(item.translatedText());
-                cacheService.store(segment, chunk.getJob(), "zh", "v1", item.translatedText());
+                String translated = textProtector.postProcess(item.translatedText());
+                segment.markTranslated(translated);
+                cacheService.store(segment, chunk.getJob(), snapshot.targetLanguage(), cachePromptVersion, translated);
             }
         }
         segmentRepository.saveAll(segments);
@@ -90,7 +99,8 @@ public class TranslationChunkWorker {
             TranslationChunkEntity chunk,
             List<Long> chunkSegmentIds,
             List<Long> segmentIds,
-            List<SegmentEntity> segments
+            List<SegmentEntity> segments,
+            TranslationRuleSnapshotData snapshot
     ) {
         Map<Long, SegmentEntity> segmentById = segments.stream()
                 .collect(Collectors.toMap(SegmentEntity::getId, Function.identity()));
@@ -109,12 +119,14 @@ public class TranslationChunkWorker {
                 .toList();
         SegmentEntity first = segmentById.get(segmentIds.getFirst());
         List<StructuredTranslationContextItem> context = contextItems(first, chunkSegmentIds);
-        List<StructuredTranslationGlossaryItem> glossary = glossaryItems(first, context, items);
+        List<StructuredTranslationGlossaryItem> glossary = glossaryItems(first, context, items, snapshot);
         return new StructuredTranslationRequest(
                 first.getBook().getSourceLanguage(),
-                "zh",
+                snapshot.targetLanguage(),
                 first.getBook().getTitle(),
                 first.getChapter().getTitle(),
+                snapshot.promptProfile(),
+                snapshot.preservation(),
                 context,
                 glossary,
                 items
@@ -124,7 +136,8 @@ public class TranslationChunkWorker {
     private List<StructuredTranslationGlossaryItem> glossaryItems(
             SegmentEntity first,
             List<StructuredTranslationContextItem> context,
-            List<StructuredTranslationSourceItem> items
+            List<StructuredTranslationSourceItem> items,
+            TranslationRuleSnapshotData snapshot
     ) {
         List<String> texts = new ArrayList<>();
         texts.add(first.getBook().getTitle());
@@ -132,7 +145,7 @@ public class TranslationChunkWorker {
         context.forEach(item -> texts.add(item.sourceText()));
         items.forEach(item -> texts.add(item.sourceText()));
         return glossaryBuilder.build(
-                chunkPlanningProperties.glossary(),
+                snapshot.glossary(),
                 texts,
                 chunkPlanningProperties.glossaryCandidateLimit()
         );

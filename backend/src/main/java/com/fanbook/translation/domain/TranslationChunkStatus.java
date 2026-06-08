@@ -4,5 +4,6 @@ public enum TranslationChunkStatus {
     PENDING,
     RUNNING,
     COMPLETED,
-    FAILED
+    FAILED,
+    SUPERSEDED
 }

@@ -1,6 +1,7 @@
 package com.fanbook.translation.api;
 
 import com.fanbook.auth.application.CurrentUserProvider;
+import com.fanbook.translation.application.TranslationGlossaryAnalysisService;
 import com.fanbook.translation.application.TranslationJobService;
 import com.fanbook.translation.application.TranslationResumeService;
 import com.fanbook.translation.application.TranslationReviewService;
@@ -18,17 +19,20 @@ public class TranslationJobController {
     private final TranslationJobService translationJobService;
     private final TranslationResumeService translationResumeService;
     private final TranslationReviewService translationReviewService;
+    private final TranslationGlossaryAnalysisService glossaryAnalysisService;
     private final CurrentUserProvider currentUserProvider;
 
     public TranslationJobController(
             TranslationJobService translationJobService,
             TranslationResumeService translationResumeService,
             TranslationReviewService translationReviewService,
+            TranslationGlossaryAnalysisService glossaryAnalysisService,
             CurrentUserProvider currentUserProvider
     ) {
         this.translationJobService = translationJobService;
         this.translationResumeService = translationResumeService;
         this.translationReviewService = translationReviewService;
+        this.glossaryAnalysisService = glossaryAnalysisService;
         this.currentUserProvider = currentUserProvider;
     }
 
@@ -62,5 +66,18 @@ public class TranslationJobController {
             @RequestBody(required = false) TranslationReviewRequest request
     ) {
         return translationReviewService.reviewForCurrentUser(bookId, request);
+    }
+
+    @PostMapping("/api/books/{bookId}/translation-glossary-analysis")
+    public GlossaryAnalysisResponse analyzeGlossary(
+            @PathVariable Long bookId,
+            @RequestBody(required = false) GlossaryAnalysisRequest request
+    ) {
+        return glossaryAnalysisService.analyzeForCurrentUser(bookId, request);
+    }
+
+    @PostMapping("/api/books/{bookId}/translation-glossary-candidates/accept")
+    public GlossaryImportResponse acceptGlossaryCandidates(@PathVariable Long bookId) {
+        return glossaryAnalysisService.acceptCandidatesForCurrentUser(bookId);
     }
 }
