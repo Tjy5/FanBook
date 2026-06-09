@@ -116,6 +116,20 @@ mock API 的固定登录账号仅用于本地界面预览：
 管理员预览账号（ADMIN）：用户名 2，密码 2
 ```
 
+更新 README 截图时，不需要依赖外部浏览器插件或临时 `npx -p` 注入。前端提供了稳定的 Playwright 脚本，会自动启动 mock API、Vite dev server、登录演示账号并覆盖 `assets/screenshots/`：
+
+```bash
+cd frontend
+npm run screenshots:readme
+```
+
+如果当前机器还没有 Playwright Chromium 浏览器缓存，先运行：
+
+```bash
+cd frontend
+npm run screenshots:install-browser
+```
+
 默认地址：
 
 - 前端：`http://localhost:5173`

@@ -36,6 +36,21 @@ cd frontend
 npm run dev
 ```
 
+README screenshots are generated from the real Vite app and mock API:
+
+```bash
+cd frontend
+npm run screenshots:readme
+```
+
+If Playwright cannot find a Chromium browser on a fresh machine, install the
+browser cache first:
+
+```bash
+cd frontend
+npm run screenshots:install-browser
+```
+
 ## Contribution Guidelines
 
 - Keep secrets out of Git. Use `backend/.env.example` as a template and keep

@@ -39,6 +39,7 @@ Notable frontend dependency licenses from the local npm metadata:
 | Vite | MIT |
 | TypeScript | Apache-2.0 |
 | @vitejs/plugin-react | MIT |
+| Playwright | Apache-2.0 |
 | lucide-react | ISC |
 | lightningcss | MPL-2.0 |
 
