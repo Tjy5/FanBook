@@ -26,6 +26,16 @@
 - 提供在线阅读器，可按章节查看原文、译文或双语内容，并为段落创建笔记与导出 Markdown。
 - 提供本地账号登录、服务端 Cookie Session、CSRF 保护、角色权限、Actuator 健康检查、OpenAPI 文档和 Docker Compose 私有部署配置。
 
+## 界面预览
+
+![Fanbook 书架总览](./assets/screenshots/fanbook-library.png)
+
+![Fanbook 翻译任务面板](./assets/screenshots/fanbook-translate.png)
+
+![Fanbook 双语阅读器](./assets/screenshots/fanbook-reader.png)
+
+![Fanbook 个人 AI 设置](./assets/screenshots/fanbook-settings.png)
+
 ## 当前边界
 
 - 当前正式输入格式只有 `.epub`。
