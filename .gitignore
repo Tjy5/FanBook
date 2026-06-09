@@ -1,8 +1,12 @@
 .env
 .env.*
 .codex/
+.agents/
 .claude/
 .antigravity/
+.codex-runtime/
+.superpowers/
+.trellis/
 .worktrees/
 .venv/
 .pytest-run-*/
@@ -16,11 +20,13 @@ __pycache__/
 .coverage.*
 htmlcov/
 temp/
+output/
 /test/
 backend/target/
 backend/runtime/
 frontend/node_modules/
 frontend/dist/
+frontendimge/
 samples/
 docs/
 reference-projects/

@@ -323,4 +323,5 @@ FanBook/
 
 ## License
 
-仓库当前未声明许可证。在复用代码或分发修改版之前，建议先补充明确的 `LICENSE` 文件。
+Fanbook is released under the [MIT License](./LICENSE). Third-party dependency
+license notes are summarized in [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md).
